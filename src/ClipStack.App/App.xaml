@@ -1,0 +1,19 @@
+﻿<Application x:Class="ClipStack.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <!-- Light palette; the theme manager swaps these in M5. -->
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#F7F7F9" />
+        <SolidColorBrush x:Key="CardBrush" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="EdgeBrush" Color="#E3E3E8" />
+        <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1B1B1F" />
+        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#6E6E76" />
+        <SolidColorBrush x:Key="TextTertiaryBrush" Color="#9A9AA2" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#0067C0" />
+        <SolidColorBrush x:Key="SelectionBrush" Color="#E6EFFA" />
+        <SolidColorBrush x:Key="HoverBrush" Color="#F0F0F3" />
+        <SolidColorBrush x:Key="BadgeBackgroundBrush" Color="#EEF1F6" />
+        <SolidColorBrush x:Key="BadgeForegroundBrush" Color="#5B6472" />
+    </Application.Resources>
+</Application>
