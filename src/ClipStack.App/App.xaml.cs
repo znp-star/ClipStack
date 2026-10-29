@@ -1,8 +1,6 @@
 ﻿using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
-using System.Windows.Media;
 using System.Windows.Threading;
 using ClipStack.App.Interop;
 using ClipStack.Core.Clipboard;
@@ -33,6 +31,9 @@ public partial class App : Application
     private IntPtr _lastTarget;
     private volatile bool _shuttingDown;
 
+    /// <summary>Effective bindings for the nine actions, resolved from settings at startup.</summary>
+    private Dictionary<HotkeyAction, HotkeyGesture> _hotkeys = [];
+
     /// <summary>Collapses the burst of clipboard updates a single copy can produce.</summary>
     private string? _lastHash;
     private long _lastHashAt;
@@ -62,7 +63,9 @@ public partial class App : Application
 
         _settings = new SettingsStore(AppPaths.Settings);
         _settings.Load();
-        ApplyAccent();
+        ThemeManager.Apply(_settings.Current.Theme);
+
+        _hotkeys = Hotkeys.Resolve(_settings.Current.Hotkeys);
 
         _store = new ItemStore(AppPaths.Database, AppPaths.Images);
 
@@ -75,6 +78,8 @@ public partial class App : Application
 
         _panel = new MainWindow(_store, _settings, _queue);
         _panel.Closed += (_, _) => Shutdown();
+        _panel.ApplyHotkeys(_hotkeys);
+        _panel.ClearHistoryRequested += ClearHistory;
 
         _monitor = new ClipboardMonitor();
         _monitor.ClipboardChanged += OnClipboardChanged;
@@ -83,9 +88,10 @@ public partial class App : Application
         _hotkey = new GlobalHotkey();
         _hotkey.Pressed += TogglePanel;
 
-        var hotkeyRegistered = _hotkey.Register(
-            HotkeyModifiers.Control | HotkeyModifiers.Shift,
-            (uint)KeyInterop.VirtualKeyFromKey(Key.V));
+        var showPanel = _hotkeys[HotkeyAction.ShowPanel];
+        var hotkeyText = HotkeyGesture.Format(showPanel);
+        var hotkeyRegistered = !showPanel.IsEmpty
+            && _hotkey.Register(showPanel.Modifiers, (uint)showPanel.VirtualKey);
 
         CreateTray();
         StartCleanupTimer();
@@ -99,35 +105,81 @@ public partial class App : Application
             _panel.ShowPanel(ResolvePasteTarget());
         }
 
+        // --settings opens the dialog right away. It needs a shown owner window, so it is ignored
+        // together with --silent.
+        if (!silent && e.Args.Any(a => string.Equals(a, "--settings", StringComparison.OrdinalIgnoreCase)))
+        {
+            OpenSettings();
+        }
+
         if (!hotkeyRegistered)
         {
-            Log.Warn("Ctrl+Shift+V is already owned by another application");
+            Log.Warn($"{hotkeyText} is already owned by another application");
             if (!silent)
             {
-                _panel.SetStatus("全局快捷键 Ctrl+Shift+V 被其他程序占用，暂时只能通过再次启动本程序唤出");
+                _panel.SetStatus(
+                    $"全局快捷键 {hotkeyText} 被其他程序占用，暂时只能通过再次启动本程序唤出；可在托盘菜单的「设置」里换一个");
             }
         }
     }
 
-    /// <summary>Replaces the accent brushes with the user's DWM accent colour.</summary>
-    private void ApplyAccent()
+    /// <summary>
+    /// Registers the panel hotkey, used both at startup and when the settings window changes it.
+    /// On failure the previous binding is restored so the panel stays reachable.
+    /// </summary>
+    private string? TryRegisterGlobal(HotkeyGesture gesture)
     {
-        var accent = DwmInterop.GetAccentColor();
-        var red = (byte)(accent >> 16);
-        var green = (byte)(accent >> 8);
-        var blue = (byte)accent;
+        if (_hotkey is null)
+        {
+            return "热键服务还没就绪";
+        }
 
-        Resources["AccentBrush"] = Freeze(new SolidColorBrush(Color.FromRgb(red, green, blue)));
-        Resources["SelectionBrush"] = Freeze(new SolidColorBrush(Color.FromArgb(0x2E, red, green, blue)));
-        Resources["SelectionEdgeBrush"] = Freeze(new SolidColorBrush(Color.FromArgb(0x66, red, green, blue)));
-        Resources["PinnedRowBrush"] = Freeze(new SolidColorBrush(Color.FromArgb(0x0F, red, green, blue)));
-        Resources["PinBadgeBrush"] = Freeze(new SolidColorBrush(Color.FromArgb(0x24, red, green, blue)));
+        if (!gesture.IsEmpty && _hotkey.Register(gesture.Modifiers, (uint)gesture.VirtualKey))
+        {
+            return null;
+        }
+
+        var previous = _hotkeys[HotkeyAction.ShowPanel];
+        if (!previous.IsEmpty)
+        {
+            _hotkey.Register(previous.Modifiers, (uint)previous.VirtualKey);
+        }
+
+        return "被其他程序占用，请换一个";
     }
 
-    private static SolidColorBrush Freeze(SolidColorBrush brush)
+    /// <summary>Opens the settings dialog and applies what it returns.</summary>
+    private void OpenSettings()
     {
-        brush.Freeze();
-        return brush;
+        if (_panel is null || _settings is null)
+        {
+            return;
+        }
+
+        var dialog = new SettingsWindow(_settings.Current, TryRegisterGlobal);
+        if (_panel.ShowDialogSuppressed(dialog) != true)
+        {
+            return;
+        }
+
+        _settings.Current.RetentionDays = dialog.RetentionDays;
+        _settings.Current.SensitiveTtlMinutes = dialog.SensitiveTtlMinutes;
+        _settings.Current.Autostart = dialog.Autostart;
+        _settings.Current.Theme = dialog.Theme;
+        _settings.Current.Hotkeys = dialog.HotkeyMap;
+        _settings.Save();
+
+        _hotkeys = Hotkeys.Resolve(_settings.Current.Hotkeys);
+        _panel.ApplyHotkeys(_hotkeys);
+        _panel.ApplySensitiveTtl(dialog.SensitiveTtlMinutes);
+        ThemeManager.Apply(_settings.Current.Theme);
+        ApplyAutostart();
+
+        // A shorter retention window may make existing rows expire right away.
+        PurgeExpired();
+
+        _panel.SetStatus("设置已保存");
+        Log.Info("Settings saved");
     }
 
     private void OnClipboardChanged(object? sender, ClipPayload payload)
@@ -306,6 +358,18 @@ public partial class App : Application
         var clear = new MenuItem { Header = "清空历史…" };
         clear.Click += (_, _) => ClearHistory();
 
+        var settings = new MenuItem { Header = "设置…" };
+        settings.Click += (_, _) => OpenSettings();
+
+        // Three flat theme items instead of a submenu: the tray menu template is deliberately
+        // flat, and a nested popup would need its own keyboard and dismissal handling.
+        var themeSystem = new MenuItem { Header = "主题：跟随系统", IsCheckable = true };
+        var themeLight = new MenuItem { Header = "主题：浅色", IsCheckable = true };
+        var themeDark = new MenuItem { Header = "主题：深色", IsCheckable = true };
+        themeSystem.Click += (_, _) => SetTheme("system");
+        themeLight.Click += (_, _) => SetTheme("light");
+        themeDark.Click += (_, _) => SetTheme("dark");
+
         var quit = new MenuItem { Header = "退出" };
         quit.Click += (_, _) => _panel?.Close();
 
@@ -313,13 +377,39 @@ public partial class App : Application
         menu.Items.Add(open);
         menu.Items.Add(pause);
         menu.Items.Add(new Separator());
+        menu.Items.Add(themeSystem);
+        menu.Items.Add(themeLight);
+        menu.Items.Add(themeDark);
+        menu.Items.Add(new Separator());
         menu.Items.Add(clear);
+        menu.Items.Add(settings);
         menu.Items.Add(new Separator());
         menu.Items.Add(quit);
 
-        // The monitor can be paused from elsewhere later (settings), so read the state on open.
-        menu.Opened += (_, _) => pause.IsChecked = _monitor?.IsPaused == true;
+        // The monitor and the theme can both be changed elsewhere (settings window, OS), so the
+        // checked state is read when the menu opens rather than when it is built.
+        menu.Opened += (_, _) =>
+        {
+            pause.IsChecked = _monitor?.IsPaused == true;
+            themeSystem.IsChecked = ThemeManager.Preference == "system";
+            themeLight.IsChecked = ThemeManager.Preference == "light";
+            themeDark.IsChecked = ThemeManager.Preference == "dark";
+        };
+
         return menu;
+    }
+
+    private void SetTheme(string preference)
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        _settings.Current.Theme = ThemeManager.Normalize(preference);
+        _settings.Save();
+        ThemeManager.Apply(_settings.Current.Theme);
+        Log.Info($"Theme set to {_settings.Current.Theme}");
     }
 
     private void SetPaused(bool paused)

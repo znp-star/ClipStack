@@ -30,12 +30,19 @@ public sealed class ClipItem
     /// <summary>Pixels for a sensitive image, which must not be written to disk.</summary>
     public byte[]? ImageBytes { get; init; }
 
-    public ClipPayload ToPastePayload() => Type switch
+    /// <summary>
+    /// The payload to put back on the clipboard. <paramref name="plainText"/> drops the HTML and
+    /// RTF renditions, which is what "粘贴为纯文本" needs — some editors pick the rich formats
+    /// even when the text looks plain.
+    /// </summary>
+    public ClipPayload ToPastePayload(bool plainText = false) => Type switch
     {
         ClipType.File => ClipPayload.ForFiles((Text ?? string.Empty)
             .Split("\r\n", StringSplitOptions.RemoveEmptyEntries)),
         ClipType.Image => ClipPayload.ForImage(ReadImage()),
-        _ => ClipPayload.ForText(Text ?? string.Empty, Html, Rtf),
+        _ => plainText
+            ? ClipPayload.ForText(Text ?? string.Empty)
+            : ClipPayload.ForText(Text ?? string.Empty, Html, Rtf),
     };
 
     private byte[] ReadImage()

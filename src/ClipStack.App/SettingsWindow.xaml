@@ -1,0 +1,222 @@
+<Window x:Class="ClipStack.App.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ClipStack.App"
+        Title="设置"
+        Width="470" Height="640"
+        MinWidth="420" MinHeight="420"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Topmost="True"
+        WindowStyle="ToolWindow"
+        Background="{DynamicResource SurfaceBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI"
+        FontSize="13"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+
+    <Window.Resources>
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="Margin" Value="0,14,0,6" />
+        </Style>
+
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="{DynamicResource TextTertiaryBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+
+        <Style x:Key="NumberBox" TargetType="TextBox">
+            <Setter Property="Width" Value="64" />
+            <Setter Property="Padding" Value="6,3" />
+            <Setter Property="HorizontalContentAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="Background" Value="{DynamicResource CardBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="SelectionBrush" Value="{DynamicResource SelectionEdgeBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource EdgeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+
+        <!-- One row of the hotkey list: the box looks like a key cap, and an accent border while
+             it waits for a keystroke. -->
+        <Style x:Key="HotkeyBox" TargetType="Button">
+            <Setter Property="Width" Value="132" />
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Focusable" Value="True" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="BoxBorder"
+                                Background="{DynamicResource CardBrush}"
+                                BorderBrush="{DynamicResource EdgeBrush}"
+                                BorderThickness="1"
+                                CornerRadius="5"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="BoxBorder" Property="Background"
+                                        Value="{DynamicResource HoverBrush}" />
+                            </Trigger>
+                            <DataTrigger Binding="{Binding IsRecording}" Value="True">
+                                <Setter TargetName="BoxBorder" Property="BorderBrush"
+                                        Value="{DynamicResource AccentBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+                            </DataTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <DataTemplate DataType="{x:Type local:HotkeyRow}">
+            <Grid Margin="0,3">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding Label}"
+                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                        <TextBlock Text="{Binding ScopeText}"
+                                   Margin="8,0,0,0"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource Hint}" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding Error}"
+                               Margin="0,2,0,0"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource AccentBrush}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasError}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+
+                <Button Grid.Column="1"
+                        Style="{StaticResource HotkeyBox}"
+                        Content="{Binding GestureText}"
+                        Tag="{Binding}"
+                        Click="HotkeyBox_Click"
+                        PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                        AutomationProperties.Name="{Binding Label}" />
+            </Grid>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+                <TextBlock Text="历史" Style="{StaticResource SectionHeader}" Margin="0,0,0,6" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="保留天数" Foreground="{DynamicResource TextPrimaryBrush}" />
+                        <TextBlock Text="1–30 天；置顶条目不受清理影响"
+                                   Style="{StaticResource Hint}" />
+                        <TextBlock x:Name="RetentionError"
+                                   FontSize="11"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource AccentBrush}"
+                                   Visibility="Collapsed" />
+                    </StackPanel>
+                    <TextBox x:Name="RetentionBox" Grid.Column="1" Style="{StaticResource NumberBox}" />
+                </Grid>
+
+                <TextBlock Text="敏感内容" Style="{StaticResource SectionHeader}" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="内存保留分钟" Foreground="{DynamicResource TextPrimaryBrush}" />
+                        <TextBlock Text="1–60 分钟；这类内容从不写入磁盘"
+                                   Style="{StaticResource Hint}" />
+                        <TextBlock x:Name="SensitiveError"
+                                   FontSize="11"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource AccentBrush}"
+                                   Visibility="Collapsed" />
+                    </StackPanel>
+                    <TextBox x:Name="SensitiveBox" Grid.Column="1" Style="{StaticResource NumberBox}" />
+                </Grid>
+
+                <TextBlock Text="启动" Style="{StaticResource SectionHeader}" />
+                <CheckBox x:Name="AutostartCheck"
+                          Content="开机自启（以 --silent 启动，不弹面板）"
+                          Foreground="{DynamicResource TextPrimaryBrush}" />
+
+                <TextBlock Text="外观" Style="{StaticResource SectionHeader}" />
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="ThemeSystem"
+                                 GroupName="Theme"
+                                 Content="跟随系统"
+                                 Margin="0,0,18,0"
+                                 Foreground="{DynamicResource TextPrimaryBrush}" />
+                    <RadioButton x:Name="ThemeLight"
+                                 GroupName="Theme"
+                                 Content="浅色"
+                                 Margin="0,0,18,0"
+                                 Foreground="{DynamicResource TextPrimaryBrush}" />
+                    <RadioButton x:Name="ThemeDark"
+                                 GroupName="Theme"
+                                 Content="深色"
+                                 Foreground="{DynamicResource TextPrimaryBrush}" />
+                </StackPanel>
+
+                <TextBlock Text="快捷键" Style="{StaticResource SectionHeader}" />
+                <TextBlock Text="点一下键位框再按键即可改绑；Esc 取消，Backspace 清空。全局动作至少要带一个修饰键。"
+                           Style="{StaticResource Hint}"
+                           Margin="0,0,0,6" />
+
+                <!-- Rows use the implicit HotkeyRow template above. -->
+                <ItemsControl x:Name="HotkeyList" />
+            </StackPanel>
+        </ScrollViewer>
+
+        <TextBlock x:Name="MessageText"
+                   Grid.Row="1"
+                   Margin="2,10,0,0"
+                   FontSize="11"
+                   TextWrapping="Wrap"
+                   Foreground="{DynamicResource AccentBrush}"
+                   Visibility="Collapsed" />
+
+        <StackPanel Grid.Row="2"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,12,0,0">
+            <Button Content="恢复默认" Style="{StaticResource DialogButton}" Click="ResetHotkeys_Click" />
+            <Button Content="取消" Style="{StaticResource DialogButton}" Click="Cancel_Click" />
+            <Button Content="保存" Style="{StaticResource PrimaryDialogButton}" Click="Save_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

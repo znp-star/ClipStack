@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -23,6 +24,12 @@ public sealed class AppSettings
 
     /// <summary>Keyed by monitor device name, e.g. <c>\\.\DISPLAY1</c>.</summary>
     public Dictionary<string, PanelGeometry> PanelGeometry { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Keyed by <see cref="Hotkeys.Id"/> ("showPanel", "paste", …). Missing or unparseable
+    /// entries fall back to the defaults in <see cref="Hotkeys"/>.
+    /// </summary>
+    public Dictionary<string, string> Hotkeys { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -36,6 +43,10 @@ public sealed class SettingsStore
     {
         WriteIndented = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+
+        // Hotkey strings ("Ctrl+Shift+V") and Chinese paths are meant to be readable when the file
+        // is opened by hand; the default encoder would write "+" as \u002B.
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
     private readonly string _path;
@@ -62,8 +73,13 @@ public sealed class SettingsStore
             Current = new AppSettings();
         }
 
+        // Deserialisation yields default-comparer dictionaries even when the property initialiser
+        // said otherwise, and a hand-edited file can carry nulls, so normalise both here.
         Current.PanelGeometry = new Dictionary<string, PanelGeometry>(
-            Current.PanelGeometry, StringComparer.OrdinalIgnoreCase);
+            Current.PanelGeometry ?? new Dictionary<string, PanelGeometry>(), StringComparer.OrdinalIgnoreCase);
+
+        Current.Hotkeys = new Dictionary<string, string>(
+            Current.Hotkeys ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase);
 
         return Current;
     }

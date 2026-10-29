@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     private readonly SettingsStore _settings;
     private readonly SensitiveQueue _queue;
     private readonly ObservableCollection<ItemRow> _rows = [];
+    private Dictionary<HotkeyAction, HotkeyGesture> _hotkeys = Hotkeys.Resolve(null);
     private IntPtr _target;
     private Monitors.MonitorInfo _monitor;
     private ClipType? _filter;
@@ -48,6 +49,56 @@ public partial class MainWindow : Window
         SourceInitialized += OnSourceInitialized;
 
         _ready = true;
+        UpdateHints();
+    }
+
+    /// <summary>Raised when the panel asks for the history to be cleared (a configurable hotkey).</summary>
+    public event Action? ClearHistoryRequested;
+
+    /// <summary>Rebinds the panel hotkeys and refreshes the footer hint line.</summary>
+    public void ApplyHotkeys(IReadOnlyDictionary<HotkeyAction, HotkeyGesture> table)
+    {
+        _hotkeys = new Dictionary<HotkeyAction, HotkeyGesture>(table);
+        UpdateHints();
+    }
+
+    /// <summary>Retunes the sensitive queue without a restart.</summary>
+    public void ApplySensitiveTtl(int minutes) =>
+        _queue.Ttl = TimeSpan.FromMinutes(Math.Clamp(minutes, 1, 60));
+
+    /// <summary>
+    /// Shows a dialog owned by the panel without the panel hiding itself behind it — losing
+    /// activation to our own child window is not a reason to disappear. Focus returns to the
+    /// search box when the dialog closes.
+    /// </summary>
+    public bool? ShowDialogSuppressed(Window dialog)
+    {
+        dialog.Owner = this;
+        _suppressDeactivate = true;
+
+        try
+        {
+            return dialog.ShowDialog();
+        }
+        finally
+        {
+            _suppressDeactivate = false;
+
+            var hwnd = new WindowInteropHelper(this).Handle;
+            WindowActivation.ForceForeground(hwnd);
+            Activate();
+            SearchBox.Focus();
+        }
+    }
+
+    private void UpdateHints()
+    {
+        string Key(HotkeyAction action) => HotkeyGesture.Format(_hotkeys[action]);
+
+        HintsText.Text =
+            $"↑↓ 选择   {Key(HotkeyAction.Paste)} 粘贴   {Key(HotkeyAction.Pin)} 置顶   " +
+            $"{Key(HotkeyAction.Edit)} 编辑   {Key(HotkeyAction.Delete)} 删除   " +
+            $"{Key(HotkeyAction.CycleFilter)} 换过滤   Esc 关闭";
     }
 
     /// <summary>Shows the panel and remembers which window should receive the paste.</summary>
@@ -168,15 +219,27 @@ public partial class MainWindow : Window
     {
         var hwnd = new WindowInteropHelper(this).Handle;
         DwmInterop.ApplyRoundedCorners(hwnd);
+        ApplyTheme(ThemeManager.IsDark);
+    }
 
-        // Without Mica (older Windows) the translucent surface would show the raw glass,
-        // so fall back to an opaque panel background.
-        var mica = DwmInterop.TryApplyMica(hwnd, dark: false);
-        Log.Info($"Panel backdrop: {(mica ? "Mica" : "opaque fallback")}");
-        if (!mica)
+    /// <summary>
+    /// Re-applies the DWM backdrop for the current theme. Without Mica (older Windows) the
+    /// translucent surface would show raw glass, so the panel paints itself opaquely instead.
+    /// The brushes stay dynamic references, so a later palette swap still repaints them.
+    /// </summary>
+    public void ApplyTheme(bool dark)
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero)
         {
-            RootBorder.Background = (Brush)FindResource("SurfaceBrush");
+            return;
         }
+
+        var mica = DwmInterop.TryApplyMica(hwnd, dark);
+        RootBorder.SetResourceReference(
+            BackgroundProperty, mica ? "PanelSurfaceBrush" : "SurfaceBrush");
+
+        Log.Info($"Panel backdrop: {(mica ? "Mica" : "opaque fallback")} ({(dark ? "dark" : "light")})");
     }
 
     /// <summary>Restores the remembered bounds for this monitor, or centres the panel on it.</summary>
@@ -256,7 +319,7 @@ public partial class MainWindow : Window
             new DoubleAnimation(8, 0, PanelAnimation) { EasingFunction = ease });
     }
 
-    private void PasteSelected()
+    private void PasteSelected(bool plainText = false)
     {
         if (ItemList.SelectedItem is not ItemRow row)
         {
@@ -273,7 +336,7 @@ public partial class MainWindow : Window
         SaveGeometry();
         Hide();
 
-        var payload = row.Item.ToPastePayload();
+        var payload = row.Item.ToPastePayload(plainText);
         if (payload.ImagePng is { Length: > 0 } png)
         {
             // Chromium-based apps ignore the raw PNG clipboard format; hand them DIB pixels too.
@@ -406,37 +469,24 @@ public partial class MainWindow : Window
         }
 
         // The dialog deactivates this window; without the flag the panel would hide behind it.
-        _suppressDeactivate = true;
-        try
+        var dialog = new EditWindow(row.Item.Text ?? string.Empty);
+        if (ShowDialogSuppressed(dialog) != true || dialog.EditedText == (row.Item.Text ?? string.Empty))
         {
-            var dialog = new EditWindow(row.Item.Text ?? string.Empty) { Owner = this };
-            if (dialog.ShowDialog() != true || dialog.EditedText == (row.Item.Text ?? string.Empty))
-            {
-                return;
-            }
-
-            var hash = ClipPayload.ForText(dialog.EditedText).ContentHash;
-            if (!_store.UpdateText(
-                    row.Item.Id,
-                    dialog.EditedText,
-                    hash,
-                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
-            {
-                SetStatus("相同内容已经存在，这次修改没有保存");
-                return;
-            }
-
-            RefreshItems();
+            return;
         }
-        finally
+
+        var hash = ClipPayload.ForText(dialog.EditedText).ContentHash;
+        if (!_store.UpdateText(
+                row.Item.Id,
+                dialog.EditedText,
+                hash,
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
         {
-            _suppressDeactivate = false;
-
-            var hwnd = new WindowInteropHelper(this).Handle;
-            WindowActivation.ForceForeground(hwnd);
-            Activate();
-            SearchBox.Focus();
+            SetStatus("相同内容已经存在，这次修改没有保存");
+            return;
         }
+
+        RefreshItems();
     }
 
     private void CycleFilter(int delta)
@@ -469,10 +519,14 @@ public partial class MainWindow : Window
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        var modifiers = Keyboard.Modifiers;
+        // Alt turns the real key into SystemKey, which is what carries the key code.
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        var modifiers = ToHotkeyModifiers(Keyboard.Modifiers);
 
-        switch (e.Key)
+        switch (key)
         {
+            // Navigation and dismissal are not configurable: they are how the panel works rather
+            // than what it does, and rebinding them would only strand the user.
             case Key.Escape:
                 if (!string.IsNullOrEmpty(SearchBox.Text))
                 {
@@ -484,48 +538,126 @@ public partial class MainWindow : Window
                 }
 
                 e.Handled = true;
-                break;
-
-            case Key.Enter:
-                PasteSelected();
-                e.Handled = true;
-                break;
+                return;
 
             case Key.Down when SearchBox.IsKeyboardFocusWithin:
                 MoveSelection(1);
                 e.Handled = true;
-                break;
+                return;
 
             case Key.Up when SearchBox.IsKeyboardFocusWithin:
                 MoveSelection(-1);
                 e.Handled = true;
+                return;
+        }
+
+        var action = MatchAction(key, modifiers);
+        if (action is null)
+        {
+            return;
+        }
+
+        e.Handled = true;
+
+        switch (action.Value)
+        {
+            case HotkeyAction.FocusSearch:
+                SearchBox.Focus();
+                SearchBox.SelectAll();
                 break;
 
-            case Key.Delete when !SearchBox.IsKeyboardFocusWithin || SearchBox.Text.Length == 0:
-                DeleteSelected();
-                e.Handled = true;
+            case HotkeyAction.Paste:
+                PasteSelected();
                 break;
 
-            case Key.F2:
+            case HotkeyAction.PastePlain:
+                PasteSelected(plainText: true);
+                break;
+
+            case HotkeyAction.Delete:
+                // While the search box has text, Delete belongs to the text field.
+                if (!SearchBox.IsKeyboardFocusWithin || SearchBox.Text.Length == 0)
+                {
+                    DeleteSelected();
+                }
+                else
+                {
+                    e.Handled = false;
+                }
+
+                break;
+
+            case HotkeyAction.Edit:
                 EditSelected();
-                e.Handled = true;
                 break;
 
-            case Key.P when modifiers == ModifierKeys.Control:
+            case HotkeyAction.Pin:
                 TogglePinSelected();
-                e.Handled = true;
                 break;
 
-            case Key.Tab when modifiers == ModifierKeys.Control:
-                CycleFilter(1);
-                e.Handled = true;
+            case HotkeyAction.CycleFilter:
+                // Ctrl+Shift+Tab walks the filter bar backwards; keep that even when the forward
+                // gesture carries a Shift of its own.
+                var backwards = !_hotkeys[HotkeyAction.CycleFilter].Modifiers.HasFlag(HotkeyModifiers.Shift)
+                    && modifiers.HasFlag(HotkeyModifiers.Shift);
+                CycleFilter(backwards ? -1 : 1);
                 break;
 
-            case Key.Tab when modifiers == (ModifierKeys.Control | ModifierKeys.Shift):
-                CycleFilter(-1);
-                e.Handled = true;
+            case HotkeyAction.ClearHistory:
+                ClearHistoryRequested?.Invoke();
                 break;
         }
+    }
+
+    /// <summary>Finds the action bound to a keystroke, if any.</summary>
+    private HotkeyAction? MatchAction(Key key, HotkeyModifiers modifiers)
+    {
+        var virtualKey = KeyInterop.VirtualKeyFromKey(key);
+
+        foreach (var (action, gesture) in _hotkeys)
+        {
+            if (Hotkeys.Matches(gesture, virtualKey, modifiers))
+            {
+                return action;
+            }
+        }
+
+        // The reverse filter gesture is derived rather than configurable.
+        if (_hotkeys[HotkeyAction.CycleFilter] is var filter
+            && !filter.Modifiers.HasFlag(HotkeyModifiers.Shift)
+            && Hotkeys.Matches(filter, virtualKey, modifiers & ~HotkeyModifiers.Shift)
+            && modifiers.HasFlag(HotkeyModifiers.Shift))
+        {
+            return HotkeyAction.CycleFilter;
+        }
+
+        return null;
+    }
+
+    private static HotkeyModifiers ToHotkeyModifiers(ModifierKeys keys)
+    {
+        var modifiers = HotkeyModifiers.None;
+        if (keys.HasFlag(ModifierKeys.Control))
+        {
+            modifiers |= HotkeyModifiers.Control;
+        }
+
+        if (keys.HasFlag(ModifierKeys.Shift))
+        {
+            modifiers |= HotkeyModifiers.Shift;
+        }
+
+        if (keys.HasFlag(ModifierKeys.Alt))
+        {
+            modifiers |= HotkeyModifiers.Alt;
+        }
+
+        if (keys.HasFlag(ModifierKeys.Windows))
+        {
+            modifiers |= HotkeyModifiers.Win;
+        }
+
+        return modifiers;
     }
 
     private void OnDeactivated(object? sender, EventArgs e)

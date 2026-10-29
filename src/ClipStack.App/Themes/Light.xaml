@@ -1,0 +1,24 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Light palette. The panel surface is translucent so the Mica backdrop shows through; the
+         accent brushes are replaced at startup with the user's system accent (ThemeManager). -->
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#F7F7F9" />
+    <SolidColorBrush x:Key="PanelSurfaceBrush" Color="#D9FFFFFF" />
+    <SolidColorBrush x:Key="CardBrush" Color="#B3FFFFFF" />
+    <SolidColorBrush x:Key="EdgeBrush" Color="#24808080" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#1F808080" />
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1B1B1F" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#6E6E76" />
+    <SolidColorBrush x:Key="TextTertiaryBrush" Color="#9A9AA2" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#0067C0" />
+    <SolidColorBrush x:Key="SelectionBrush" Color="#E6EFFA" />
+    <SolidColorBrush x:Key="SelectionEdgeBrush" Color="#400067C0" />
+    <SolidColorBrush x:Key="HoverBrush" Color="#0D000000" />
+    <SolidColorBrush x:Key="BadgeBackgroundBrush" Color="#1A000000" />
+    <SolidColorBrush x:Key="BadgeForegroundBrush" Color="#5B6472" />
+    <SolidColorBrush x:Key="PinnedRowBrush" Color="#0F0067C0" />
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#40000000" />
+    <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#66000000" />
+    <SolidColorBrush x:Key="ScrollThumbDragBrush" Color="#8C000000" />
+</ResourceDictionary>

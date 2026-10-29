@@ -411,7 +411,8 @@
                         </Style>
                     </Button.Style>
                 </Button>
-                <TextBlock FontSize="11"
+                <TextBlock x:Name="HintsText"
+                           FontSize="11"
                            Foreground="{DynamicResource TextTertiaryBrush}"
                            TextWrapping="Wrap"
                            Text="↑↓ 选择   Enter 粘贴   Ctrl+P 置顶   F2 编辑   Del 删除   Ctrl+Tab 换过滤   Esc 关闭" />

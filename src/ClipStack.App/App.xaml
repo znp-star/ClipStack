@@ -3,26 +3,12 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
-        <!-- Light palette. The panel surface is translucent so the Mica backdrop shows through;
-             the accent brushes are replaced at startup with the user's system accent. -->
-        <SolidColorBrush x:Key="SurfaceBrush" Color="#F7F7F9" />
-        <SolidColorBrush x:Key="PanelSurfaceBrush" Color="#D9FFFFFF" />
-        <SolidColorBrush x:Key="CardBrush" Color="#B3FFFFFF" />
-        <SolidColorBrush x:Key="EdgeBrush" Color="#24808080" />
-        <SolidColorBrush x:Key="DividerBrush" Color="#1F808080" />
-        <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1B1B1F" />
-        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#6E6E76" />
-        <SolidColorBrush x:Key="TextTertiaryBrush" Color="#9A9AA2" />
-        <SolidColorBrush x:Key="AccentBrush" Color="#0067C0" />
-        <SolidColorBrush x:Key="SelectionBrush" Color="#E6EFFA" />
-        <SolidColorBrush x:Key="SelectionEdgeBrush" Color="#400067C0" />
-        <SolidColorBrush x:Key="HoverBrush" Color="#0D000000" />
-        <SolidColorBrush x:Key="BadgeBackgroundBrush" Color="#1A000000" />
-        <SolidColorBrush x:Key="BadgeForegroundBrush" Color="#5B6472" />
-        <SolidColorBrush x:Key="PinnedRowBrush" Color="#0F0067C0" />
-        <SolidColorBrush x:Key="ScrollThumbBrush" Color="#40000000" />
-        <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#66000000" />
-        <SolidColorBrush x:Key="ScrollThumbDragBrush" Color="#8C000000" />
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Palette only. ThemeManager swaps this entry for Themes/Dark.xaml; every brush
+                     reference in the app is a DynamicResource, so the swap repaints everything. -->
+                <ResourceDictionary Source="Themes/Light.xaml" />
+            </ResourceDictionary.MergedDictionaries>
 
         <!-- Slim thumb-only scrollbar: no arrow buttons, no visible track, so the list reads as
              content rather than a dialog. Page clicks on the empty track still work. -->
@@ -115,6 +101,44 @@
             </Style.Triggers>
         </Style>
 
+        <!-- Dialog buttons, shared by the edit and settings windows. -->
+        <Style x:Key="DialogButton" TargetType="Button">
+            <Setter Property="Padding" Value="16,5" />
+            <Setter Property="Margin" Value="8,0,0,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="{DynamicResource CardBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{DynamicResource EdgeBrush}"
+                                BorderThickness="1"
+                                CornerRadius="5"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background"
+                                        Value="{DynamicResource HoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PrimaryDialogButton"
+               TargetType="Button"
+               BasedOn="{StaticResource DialogButton}">
+            <Setter Property="Background" Value="{DynamicResource SelectionBrush}" />
+        </Style>
+
         <!-- Tray menu: same flat, rounded language as the panel. Menus are flat lists here, so the
              templates deliberately drop the popup/icon plumbing that nested submenus would need. -->
         <Style TargetType="ContextMenu">
@@ -201,5 +225,6 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

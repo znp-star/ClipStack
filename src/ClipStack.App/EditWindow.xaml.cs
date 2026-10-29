@@ -12,6 +12,7 @@ public partial class EditWindow : Window
     public EditWindow(string text)
     {
         InitializeComponent();
+        ThemeManager.Attach(this);
 
         Editor.Text = text;
         Loaded += (_, _) =>

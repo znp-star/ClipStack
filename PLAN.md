@@ -208,7 +208,7 @@ CREATE INDEX        ix_items_pinned ON items(pinned, pinned_at DESC);
 
 ### 主题
 
-三态：跟随系统 / 浅色 / 深色，托盘二级菜单与设置页均可切换，立即生效。背景用 DWM Mica（`DWMWA_SYSTEMBACKDROP_TYPE`），跟随系统深浅色。弹入 120ms 淡入 + 8px 上移，不做弹跳。选中色用系统 accent。
+三态：跟随系统 / 浅色 / 深色，托盘菜单与设置页均可切换，立即生效。托盘里三项平铺（不设二级菜单，理由见 M5 备注）。背景用 DWM Mica（`DWMWA_SYSTEMBACKDROP_TYPE`），跟随系统深浅色。弹入 120ms 淡入 + 8px 上移，不做弹跳。选中色用系统 accent。
 
 ### 托盘与生命周期
 
@@ -281,7 +281,7 @@ UI 与 Win32 交互不铺自动化测试。
 | M3 ✅ | 置顶、编辑、类型过滤 | 置顶区独立、编辑保存、过滤条可用 |
 | M3.5 ✅ | 托盘、自启与定时清理 | 通知区图标（左键唤出、右键菜单）、开机自启、每小时清理 |
 | M4 ✅ | 敏感与过期 | 敏感项带「未保存」角标且不落库；过期清理已随 M3.5 完成 |
-| M5 | 设置与热键 | 9 个动作可改、冲突提示、主题三态 |
+| M5 ✅ | 设置与热键 | 9 个动作可改、冲突提示、主题三态 |
 | M6 | 打包与自动更新 | Velopack 产物、GitHub Release 可升级 |
 
 ### M1 实现备注
@@ -341,6 +341,23 @@ UI 与 Win32 交互不铺自动化测试。
 - 回环在这条路上更要紧：敏感项回粘时来源会变成 `ClipStack` 自己，内容正则也未必再命中（比如从密码管理器复制、内容只是一串普通密码）。所以依旧靠写入前的 `ClipStack.IgnoreNext` 标记让监听侧跳过整次更新，而不是靠内容比对。
 - 敏感图片的像素只放在 `ClipItem.ImageBytes`，缩略图由 `ItemRow.FromBytes` 从内存解码，不写 `images\`。托盘「清空历史」一并 `Clear()` 队列，`OnExit` 退出前再清一次。
 - 已知限制：TTL 只在启动时读一次，改设置需重启（设置窗口在 M5）；判定不看图片内容，也不看 `use_count`。
+
+### M5 实现备注
+
+- 九个动作集中登记在 `Hotkeys`（id / 中文标签 / 作用域 / 默认值 / 校验），设置窗口、面板查表、托盘都从这一处取，避免三份表各自漂移。
+- 手势用与 UI 无关的 `HotkeyGesture`（虚拟键码 + `HotkeyModifiers`），`TryParse` 认 A–Z / 0–9 / F1–F24 与命名键；解析失败回落默认值，手改错一个字符只会回到默认，不会把动作变成死键。App 层再用 `KeyInterop` 与 WPF 的 `Key` 互转。
+- 面板内快捷键改成查表匹配（`MatchAction`）。Alt 组合在 WPF 里 `e.Key` 是 `Key.System`，必须取 `e.SystemKey`，否则任何带 Alt 的绑定都匹配不上。↑↓ 与 Esc 仍是硬编码：它们描述面板怎么用，不描述面板做什么。
+- `Ctrl+Shift+Tab` 的反向切换由「已配置的过滤键 + Shift」派生，不额外占一个动作位。
+- 「粘贴为纯文本」走 `ClipItem.ToPastePayload(plainText: true)`，丢掉 html / rtf 两种 rendition；否则部分编辑器仍按富文本贴。
+- 全局键只在 `App` 注册。设置窗口保存前先试注册（`TryRegisterGlobal`），失败就把旧键注册回去并在那一行标红——接受一个注册不上的键会让面板再也唤不出来。
+- 校验三条：修饰键单独出现、全局动作不带修饰键、九个动作互相重复，都拒绝保存；重复时两行同时标红，因为不知道用户想改哪一条。
+- 保存后即时生效：`ApplyHotkeys` 重绑并重排底部的提示行（提示文字由键位表生成，不再写死）；`ApplySensitiveTtl` 直接改队列 TTL；保留期变短会立刻 `PurgeExpired`；主题当场换。设置窗口关闭后把焦点还给搜索框（`ShowDialogSuppressed`），否则面板会被自己的失焦逻辑藏起来。
+- 主题用两份合并字典（`Themes/Light.xaml`、`Themes/Dark.xaml`）而不是 `ThemeDictionaries`——后者是 WinUI 的概念，WPF 不支持。全应用没有硬编码颜色，换字典即换主题；强调色在深色下向白混合 40%，系统给的深蓝在 `#1F1F23` 上根本看不见。
+- Mica 跟着主题走（`TryApplyMica(hwnd, dark)`）；没有 Mica 的旧系统上面板退回不透明 `SurfaceBrush`。对话框只改标题栏深色（`ApplyDarkFrame`），在 `SourceInitialized` 里做，晚开的窗口不会留着浅色标题栏。
+- 「跟随系统」订阅 `SystemEvents.UserPreferenceChanged`：系统切换应用深浅色时无需重启跟随，且只在 `Theme = system` 时响应。
+- 设置文件改用 `UnsafeRelaxedJsonEscaping`，否则 `Ctrl+Shift+V` 会写成 `Ctrl\u002BShift\u002BV`，手改设置文件时很难辨认。
+- 托盘的主题切换用三行平铺（「主题：跟随系统 / 浅色 / 深色」）而不是二级菜单：现有 `ContextMenu` 模板刻意不支持嵌套 Popup，补上要连带处理键盘导航、逐层关闭与贴屏翻边，而眼下只有「主题」一项需要分组，平铺反而少一次点击。等托盘出现第二个需要分组的项时再做子菜单。
+- 新增启动参数 `--settings`：直接打开设置窗口。它需要面板已显示（对话窗的 Owner 必须是已显示的窗口），因此与 `--silent` 同用时忽略。
 
 ---
 

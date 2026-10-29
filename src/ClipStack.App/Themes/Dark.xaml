@@ -1,0 +1,24 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Dark palette. Same key set as Light.xaml: swapping the merged dictionary is the whole
+         theme switch, because every brush reference in the app is a DynamicResource. -->
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#1F1F23" />
+    <SolidColorBrush x:Key="PanelSurfaceBrush" Color="#CC1C1C20" />
+    <SolidColorBrush x:Key="CardBrush" Color="#24FFFFFF" />
+    <SolidColorBrush x:Key="EdgeBrush" Color="#33FFFFFF" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#1FFFFFFF" />
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#F2F2F5" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#A9A9B3" />
+    <SolidColorBrush x:Key="TextTertiaryBrush" Color="#7C7C87" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#4CC2FF" />
+    <SolidColorBrush x:Key="SelectionBrush" Color="#334CC2FF" />
+    <SolidColorBrush x:Key="SelectionEdgeBrush" Color="#664CC2FF" />
+    <SolidColorBrush x:Key="HoverBrush" Color="#1FFFFFFF" />
+    <SolidColorBrush x:Key="BadgeBackgroundBrush" Color="#26FFFFFF" />
+    <SolidColorBrush x:Key="BadgeForegroundBrush" Color="#B9B9C4" />
+    <SolidColorBrush x:Key="PinnedRowBrush" Color="#1A4CC2FF" />
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#55FFFFFF" />
+    <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#80FFFFFF" />
+    <SolidColorBrush x:Key="ScrollThumbDragBrush" Color="#A6FFFFFF" />
+</ResourceDictionary>
