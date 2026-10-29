@@ -13,8 +13,8 @@ namespace ClipStack.Core.Clipboard;
 /// </summary>
 public static class ClipboardReader
 {
-    private const int OpenAttempts = 5;
-    private const int OpenRetryDelayMs = 10;
+    private const int OpenAttempts = 10;
+    private const int OpenRetryDelayMs = 15;
 
     /// <summary>Single-item ceiling, matching the default <c>max_item_bytes</c> setting.</summary>
     public const long MaxImageBytes = 10 * 1024 * 1024;
@@ -54,13 +54,25 @@ public static class ClipboardReader
 
     private static ClipPayload? ReadLocked()
     {
-        if (NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_HDROP))
+        var files = NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_HDROP)
+            ? ReadFileDrop()
+            : [];
+
+        // A single image file copy (screenshot tools, "copy image" in a file manager) usually
+        // also carries the pixels. Prefer the pixels: pasting an image beats pasting a path.
+        var singleImageFile = files.Count == 1 && ClipFileTypes.IsImageFile(files[0]);
+        if (singleImageFile && HasImageData())
         {
-            var files = ReadFileDrop();
-            if (files.Count > 0)
+            var fromClipboard = ReadImage();
+            if (fromClipboard is not null)
             {
-                return ClipPayload.ForFiles(files);
+                return fromClipboard;
             }
+        }
+
+        if (files.Count > 0)
+        {
+            return ClipPayload.ForFiles(files);
         }
 
         var text = ReadUnicodeText();
@@ -74,6 +86,11 @@ public static class ClipboardReader
 
         return ReadImage();
     }
+
+    private static bool HasImageData() =>
+        NativeMethods.IsClipboardFormatAvailable(ClipboardFormats.Png)
+        || NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_DIBV5)
+        || NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_DIB);
 
     /// <summary>
     /// Prefers the "PNG" format (already encoded, keeps alpha) and falls back to a raw

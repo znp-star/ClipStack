@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using ClipStack.Core.Images;
 using ClipStack.Core.Interop;
 using ClipStack.Core.Logging;
 using ClipStack.Core.Models;
@@ -11,8 +12,8 @@ namespace ClipStack.Core.Clipboard;
 /// </summary>
 public static class ClipboardWriter
 {
-    private const int OpenAttempts = 5;
-    private const int OpenRetryDelayMs = 10;
+    private const int OpenAttempts = 10;
+    private const int OpenRetryDelayMs = 15;
 
     public static bool TryWrite(ClipPayload payload)
     {
@@ -36,6 +37,21 @@ public static class ClipboardWriter
                     if (!SetBytes(ClipboardFormats.Png, image))
                     {
                         return false;
+                    }
+                }
+                else if (payload.FilePaths is { Count: > 0 } files)
+                {
+                    // Paste a real file drop so Explorer and chat apps receive the file,
+                    // not its path as text.
+                    if (!SetBytes(NativeMethods.CF_HDROP, DropFilesData.Build(files)))
+                    {
+                        return false;
+                    }
+
+                    // PNG pixels ride along, so targets that only accept images get one.
+                    if (files.Count == 1 && files[0].EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                    {
+                        TrySetFileBytes(files[0]);
                     }
                 }
                 else if (!string.IsNullOrEmpty(payload.Text))
@@ -64,6 +80,29 @@ public static class ClipboardWriter
         var chars = new char[text.Length + 1];
         text.CopyTo(chars);
         return SetBytes(NativeMethods.CF_UNICODETEXT, MemoryMarshal.AsBytes(chars.AsSpan()).ToArray());
+    }
+
+    /// <summary>Adds the PNG pixels of a dropped image file when it can be read cheaply.</summary>
+    private static void TrySetFileBytes(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists || info.Length is <= 0 or > ClipboardReader.MaxImageBytes)
+            {
+                return;
+            }
+
+            var bytes = File.ReadAllBytes(path);
+            if (PngEncoder.LooksLikePng(bytes))
+            {
+                _ = SetBytes(ClipboardFormats.Png, bytes);
+            }
+        }
+        catch (IOException)
+        {
+            // The file vanished or is locked; the file drop itself is still valid.
+        }
     }
 
     private static bool SetBytes(uint format, byte[] bytes)

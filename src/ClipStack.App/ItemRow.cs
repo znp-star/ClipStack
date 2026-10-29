@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.RegularExpressions;
+using ClipStack.Core.Clipboard;
 using ClipStack.Core.Models;
 
 namespace ClipStack.App;
@@ -12,15 +13,17 @@ public sealed class ItemRow
     public ItemRow(ClipItem item)
     {
         Item = item;
-        Badge = item.Type switch
-        {
-            ClipType.Image => "图片",
-            ClipType.File => "文件",
-            _ => "文本",
-        };
+        ThumbnailPath = ResolveThumbnail(item);
+        Badge = item.Type == ClipType.File && ThumbnailPath is not null
+            ? "图片"
+            : item.Type switch
+            {
+                ClipType.Image => "图片",
+                ClipType.File => "文件",
+                _ => "文本",
+            };
         Preview = BuildPreview(item);
-        Meta = BuildMeta(item);
-        ThumbnailPath = item.Type == ClipType.Image && File.Exists(item.ImagePath) ? item.ImagePath : null;
+        Meta = BuildMeta(item, ThumbnailPath);
     }
 
     public ClipItem Item { get; }
@@ -28,8 +31,30 @@ public sealed class ItemRow
     public string Preview { get; }
     public string Meta { get; }
 
-    /// <summary>Local PNG for image items; bound directly by the row template.</summary>
+    /// <summary>Local image file for the row thumbnail; bound directly by the row template.</summary>
     public string? ThumbnailPath { get; }
+
+    /// <summary>
+    /// Image items point at their stored PNG. File items can show a thumbnail too when they hold
+    /// a single image file, so copying a screenshot file does not look like an opaque path.
+    /// </summary>
+    private static string? ResolveThumbnail(ClipItem item)
+    {
+        if (item.Type == ClipType.Image)
+        {
+            return string.IsNullOrEmpty(item.ImagePath) || !File.Exists(item.ImagePath) ? null : item.ImagePath;
+        }
+
+        if (item.Type != ClipType.File)
+        {
+            return null;
+        }
+
+        var paths = (item.Text ?? string.Empty).Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+        return paths.Length == 1 && ClipFileTypes.IsImageFile(paths[0]) && File.Exists(paths[0])
+            ? paths[0]
+            : null;
+    }
 
     private static string BuildPreview(ClipItem item)
     {
@@ -63,7 +88,7 @@ public sealed class ItemRow
             : text.Length > 240 ? text[..240] + "…" : text;
     }
 
-    private static string BuildMeta(ClipItem item)
+    private static string BuildMeta(ClipItem item, string? thumbnailPath)
     {
         var app = string.IsNullOrWhiteSpace(item.SourceApp) ? "未知来源" : item.SourceApp;
         var age = DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeMilliseconds(item.LastUsedAtMs);
@@ -76,7 +101,8 @@ public sealed class ItemRow
             _ => $"{(int)age.TotalDays} 天前",
         };
 
-        var size = item.Type == ClipType.Image ? FormatSize(item.ImagePath) : null;
+        var sizeSource = thumbnailPath ?? (item.Type == ClipType.Image ? item.ImagePath : null);
+        var size = sizeSource is null ? null : FormatSize(sizeSource);
         var middle = size is null ? time : $"{time} · {size}";
 
         return item.Pinned ? $"已置顶 · {app}" : $"{app} · {middle}";
