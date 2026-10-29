@@ -312,7 +312,12 @@
                                             AutomationProperties.Name="置顶">
                                         <Button.Style>
                                             <Style TargetType="Button">
-                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <!-- Always occupies its slot; hover only fades it in.
+                                                     Toggling Visibility collapsed the Auto-sized
+                                                     column, which narrowed the star column and
+                                                     rewrapped two-line previews on every hover. -->
+                                                <Setter Property="Opacity" Value="0" />
+                                                <Setter Property="IsHitTestVisible" Value="False" />
                                                 <Setter Property="Background" Value="Transparent" />
                                                 <Setter Property="Template">
                                                     <Setter.Value>
@@ -343,14 +348,18 @@
                                                 </Setter>
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding IsPinned}" Value="True">
-                                                        <Setter Property="Visibility" Value="Visible" />
+                                                        <Setter Property="Opacity" Value="1" />
+                                                        <Setter Property="IsHitTestVisible" Value="True" />
                                                     </DataTrigger>
                                                     <DataTrigger
                                                         Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
                                                         Value="True">
-                                                        <Setter Property="Visibility" Value="Visible" />
+                                                        <Setter Property="Opacity" Value="1" />
+                                                        <Setter Property="IsHitTestVisible" Value="True" />
                                                     </DataTrigger>
-                                                    <!-- Last, so it wins: a sensitive row can never be pinned. -->
+                                                    <!-- Last, so it wins: a sensitive row can never be pinned.
+                                                         Collapsed (not just transparent) so the badge,
+                                                         which does not fade, is not pushed sideways. -->
                                                     <DataTrigger Binding="{Binding IsSensitive}" Value="True">
                                                         <Setter Property="Visibility" Value="Collapsed" />
                                                     </DataTrigger>
