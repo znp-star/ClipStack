@@ -361,11 +361,18 @@ public partial class App : Application
         var settings = new MenuItem { Header = "设置…" };
         settings.Click += (_, _) => OpenSettings();
 
-        // Three flat theme items instead of a submenu: the tray menu template is deliberately
-        // flat, and a nested popup would need its own keyboard and dismissal handling.
-        var themeSystem = new MenuItem { Header = "主题：跟随系统", IsCheckable = true };
-        var themeLight = new MenuItem { Header = "主题：浅色", IsCheckable = true };
-        var themeDark = new MenuItem { Header = "主题：深色", IsCheckable = true };
+        // A caption plus three short rows instead of "主题：" repeated three times: the same
+        // grouping as a submenu, without a nested popup the flat template cannot host.
+        var themeLabel = new MenuItem
+        {
+            Header = "主题",
+            Style = (Style)FindResource("MenuSectionLabel"),
+        };
+
+        var childStyle = (Style)FindResource("MenuChildItem");
+        var themeSystem = new MenuItem { Header = "跟随系统", IsCheckable = true, Style = childStyle };
+        var themeLight = new MenuItem { Header = "浅色", IsCheckable = true, Style = childStyle };
+        var themeDark = new MenuItem { Header = "深色", IsCheckable = true, Style = childStyle };
         themeSystem.Click += (_, _) => SetTheme("system");
         themeLight.Click += (_, _) => SetTheme("light");
         themeDark.Click += (_, _) => SetTheme("dark");
@@ -377,6 +384,7 @@ public partial class App : Application
         menu.Items.Add(open);
         menu.Items.Add(pause);
         menu.Items.Add(new Separator());
+        menu.Items.Add(themeLabel);
         menu.Items.Add(themeSystem);
         menu.Items.Add(themeLight);
         menu.Items.Add(themeDark);
