@@ -18,6 +18,9 @@ public sealed class ClipItem
     public bool Pinned { get; init; }
     public long? PinnedAtMs { get; init; }
 
+    /// <summary>Text items whose whole content is one link; drives the 链接 filter and badge.</summary>
+    public bool IsLink { get; init; }
+
     public ClipPayload ToPastePayload() => Type switch
     {
         ClipType.File => ClipPayload.ForFiles((Text ?? string.Empty)

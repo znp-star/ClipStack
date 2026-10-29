@@ -17,6 +17,43 @@
         UseLayoutRounding="True"
         SnapsToDevicePixels="True">
 
+    <Window.Resources>
+        <!-- Filter bar chip: a radio button rendered as a pill so the whole bar reads as one control. -->
+        <Style x:Key="FilterChip" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="ChipBorder"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                BorderThickness="1"
+                                CornerRadius="10"
+                                Padding="9,2">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ChipBorder" Property="Background"
+                                        Value="{DynamicResource HoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="ChipBorder" Property="Background"
+                                        Value="{DynamicResource SelectionBrush}" />
+                                <Setter TargetName="ChipBorder" Property="BorderBrush"
+                                        Value="{DynamicResource SelectionEdgeBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
     <!-- CaptionHeight 0 keeps every pixel under our own hit-testing (dragging is handled
          in code), while ResizeBorderThickness gives the panel real resize borders. -->
     <shell:WindowChrome.WindowChrome>
@@ -39,6 +76,7 @@
 
         <Grid Margin="12">
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
@@ -81,8 +119,45 @@
                 </Grid>
             </Border>
 
+            <!-- Filter bar -->
+            <StackPanel Grid.Row="1"
+                        Orientation="Horizontal"
+                        Margin="2,0,0,8">
+                <RadioButton x:Name="FilterAll"
+                             Style="{StaticResource FilterChip}"
+                             GroupName="Filter"
+                             Tag="all"
+                             Content="全部"
+                             IsChecked="True"
+                             Checked="FilterChip_Checked" />
+                <RadioButton x:Name="FilterText"
+                             Style="{StaticResource FilterChip}"
+                             GroupName="Filter"
+                             Tag="text"
+                             Content="文本"
+                             Checked="FilterChip_Checked" />
+                <RadioButton x:Name="FilterLink"
+                             Style="{StaticResource FilterChip}"
+                             GroupName="Filter"
+                             Tag="link"
+                             Content="链接"
+                             Checked="FilterChip_Checked" />
+                <RadioButton x:Name="FilterImage"
+                             Style="{StaticResource FilterChip}"
+                             GroupName="Filter"
+                             Tag="image"
+                             Content="图片"
+                             Checked="FilterChip_Checked" />
+                <RadioButton x:Name="FilterFile"
+                             Style="{StaticResource FilterChip}"
+                             GroupName="Filter"
+                             Tag="file"
+                             Content="文件"
+                             Checked="FilterChip_Checked" />
+            </StackPanel>
+
             <!-- Items -->
-            <Grid Grid.Row="1">
+            <Grid Grid.Row="2">
                 <ListBox x:Name="ItemList"
                          Background="Transparent"
                          BorderThickness="0"
@@ -94,20 +169,48 @@
                     <ListBox.ItemContainerStyle>
                         <Style TargetType="ListBoxItem">
                             <Setter Property="Padding" Value="0" />
-                            <Setter Property="Margin" Value="0,1" />
                             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <!-- The row shows selection itself; a dotted focus rectangle would be noise
+                                 (focus stays in the search box anyway). -->
+                            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
                             <Setter Property="Template">
                                 <Setter.Value>
                                     <ControlTemplate TargetType="ListBoxItem">
-                                        <Border x:Name="RowBorder"
-                                                Background="Transparent"
-                                                BorderBrush="Transparent"
-                                                BorderThickness="1"
-                                                CornerRadius="6"
-                                                Padding="10,8">
-                                            <ContentPresenter />
-                                        </Border>
+                                        <!-- Row background and the separator rule are siblings, so a
+                                             selected row never paints over the rule. -->
+                                        <StackPanel>
+                                            <Border x:Name="RowBorder"
+                                                    MinHeight="52"
+                                                    Background="Transparent"
+                                                    BorderBrush="Transparent"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6"
+                                                    Padding="12,7,10,7">
+                                                <Grid>
+                                                    <!-- Shape, not only colour: the row that Enter will
+                                                         paste carries a stripe. -->
+                                                    <Border x:Name="ActiveStripe"
+                                                            Width="3"
+                                                            Margin="-7,1,0,1"
+                                                            HorizontalAlignment="Left"
+                                                            VerticalAlignment="Stretch"
+                                                            Background="{DynamicResource AccentBrush}"
+                                                            CornerRadius="1.5"
+                                                            Visibility="Collapsed" />
+                                                    <ContentPresenter VerticalAlignment="Center" />
+                                                </Grid>
+                                            </Border>
+                                            <Border Height="1"
+                                                    Margin="12,0,12,0"
+                                                    Background="{DynamicResource DividerBrush}" />
+                                        </StackPanel>
                                         <ControlTemplate.Triggers>
+                                            <!-- The pinned block sits on top; a faint tint keeps its
+                                                 edge readable without a second divider. -->
+                                            <DataTrigger Binding="{Binding IsPinned}" Value="True">
+                                                <Setter TargetName="RowBorder" Property="Background"
+                                                        Value="{DynamicResource PinnedRowBrush}" />
+                                            </DataTrigger>
                                             <Trigger Property="IsMouseOver" Value="True">
                                                 <Setter TargetName="RowBorder" Property="Background"
                                                         Value="{DynamicResource HoverBrush}" />
@@ -117,6 +220,8 @@
                                                         Value="{DynamicResource SelectionBrush}" />
                                                 <Setter TargetName="RowBorder" Property="BorderBrush"
                                                         Value="{DynamicResource SelectionEdgeBrush}" />
+                                                <Setter TargetName="ActiveStripe" Property="Visibility"
+                                                        Value="Visible" />
                                             </Trigger>
                                         </ControlTemplate.Triggers>
                                     </ControlTemplate>
@@ -134,36 +239,19 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
 
+                                <!-- Thumbnail leads the row so image entries are recognisable at a glance.
+                                     Painted as a Border background (not an Image) so the corners round. -->
                                 <Border Grid.Column="0"
-                                        VerticalAlignment="Top"
-                                        Background="{DynamicResource BadgeBackgroundBrush}"
+                                        Width="56" Height="38"
+                                        Margin="0,0,10,0"
+                                        VerticalAlignment="Center"
                                         CornerRadius="4"
-                                        Padding="6,1"
-                                        Margin="0,2,0,0">
-                                    <TextBlock Text="{Binding Badge}"
-                                               FontSize="11"
-                                               Foreground="{DynamicResource BadgeForegroundBrush}" />
-                                </Border>
-
-                                <StackPanel Grid.Column="1" Margin="10,0,0,0">
-                                    <TextBlock Text="{Binding Preview}"
-                                               Foreground="{DynamicResource TextPrimaryBrush}"
-                                               TextWrapping="NoWrap"
-                                               TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{Binding Meta}"
-                                               Margin="0,3,0,0"
-                                               FontSize="11"
-                                               Foreground="{DynamicResource TextTertiaryBrush}"
-                                               TextTrimming="CharacterEllipsis" />
-                                </StackPanel>
-
-                                <!-- Thumbnail, only for image items -->
-                                <Border Grid.Column="2"
-                                        Width="52" Height="34"
-                                        Margin="10,0,0,0"
-                                        CornerRadius="4"
-                                        Background="{DynamicResource BadgeBackgroundBrush}"
-                                        ClipToBounds="True">
+                                        BorderBrush="{DynamicResource EdgeBrush}"
+                                        BorderThickness="1"
+                                        RenderOptions.BitmapScalingMode="HighQuality">
+                                    <Border.Background>
+                                        <ImageBrush ImageSource="{Binding ThumbnailPath}" Stretch="UniformToFill" />
+                                    </Border.Background>
                                     <Border.Style>
                                         <Style TargetType="Border">
                                             <Style.Triggers>
@@ -173,8 +261,76 @@
                                             </Style.Triggers>
                                         </Style>
                                     </Border.Style>
-                                    <Image Source="{Binding ThumbnailPath}" Stretch="UniformToFill" />
                                 </Border>
+
+                                <!-- At most two lines, then an ellipsis; no source, time, size or type -->
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding Preview}"
+                                           Visibility="{Binding PreviewVisibility}"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                           TextWrapping="Wrap"
+                                           TextTrimming="CharacterEllipsis"
+                                           LineHeight="18"
+                                           LineStackingStrategy="BlockLineHeight"
+                                           MaxHeight="36" />
+
+                                <!-- Pin control: always visible on pinned rows, appears on hover
+                                     for the rest. Clicking pins/unpins without pasting. -->
+                                <Button x:Name="PinButton"
+                                        Grid.Column="2"
+                                        Width="26" Height="26"
+                                        Margin="6,0,0,0"
+                                        VerticalAlignment="Center"
+                                        Focusable="False"
+                                        Cursor="Hand"
+                                        Click="PinButton_Click"
+                                        ToolTip="置顶 / 取消置顶 (Ctrl+P)"
+                                        AutomationProperties.Name="置顶">
+                                    <Button.Style>
+                                        <Style TargetType="Button">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Setter Property="Background" Value="Transparent" />
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="Button">
+                                                        <Border x:Name="PinHover"
+                                                                Background="Transparent"
+                                                                CornerRadius="13">
+                                                            <TextBlock x:Name="PinGlyph"
+                                                                       Text="&#xE718;"
+                                                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                                       FontSize="12"
+                                                                       HorizontalAlignment="Center"
+                                                                       VerticalAlignment="Center"
+                                                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                                                        </Border>
+                                                        <ControlTemplate.Triggers>
+                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter TargetName="PinHover" Property="Background"
+                                                                        Value="{DynamicResource HoverBrush}" />
+                                                            </Trigger>
+                                                            <DataTrigger Binding="{Binding IsPinned}" Value="True">
+                                                                <Setter TargetName="PinGlyph" Property="Foreground"
+                                                                        Value="{DynamicResource AccentBrush}" />
+                                                            </DataTrigger>
+                                                        </ControlTemplate.Triggers>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsPinned}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                                <DataTrigger
+                                                    Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                                    Value="True">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
                             </Grid>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
@@ -190,7 +346,7 @@
 
             <!-- Status -->
             <TextBlock x:Name="StatusText"
-                       Grid.Row="2"
+                       Grid.Row="3"
                        Margin="2,8,2,0"
                        FontSize="11"
                        TextWrapping="Wrap"
@@ -198,7 +354,7 @@
                        Visibility="Collapsed" />
 
             <!-- Hints -->
-            <DockPanel Grid.Row="3" Margin="2,8,2,0">
+            <DockPanel Grid.Row="4" Margin="2,8,2,0">
                 <Button DockPanel.Dock="Right"
                         Content="退出"
                         Padding="6,0"
@@ -229,7 +385,8 @@
                 </Button>
                 <TextBlock FontSize="11"
                            Foreground="{DynamicResource TextTertiaryBrush}"
-                           Text="↑↓ 选择    Enter 粘贴    Esc 关闭" />
+                           TextWrapping="Wrap"
+                           Text="↑↓ 选择   Enter 粘贴   Ctrl+P 置顶   F2 编辑   Del 删除   Ctrl+Tab 换过滤   Esc 关闭" />
             </DockPanel>
         </Grid>
     </Border>

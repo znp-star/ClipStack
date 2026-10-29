@@ -110,6 +110,8 @@ public partial class App : Application
         Resources["AccentBrush"] = Freeze(new SolidColorBrush(Color.FromRgb(red, green, blue)));
         Resources["SelectionBrush"] = Freeze(new SolidColorBrush(Color.FromArgb(0x2E, red, green, blue)));
         Resources["SelectionEdgeBrush"] = Freeze(new SolidColorBrush(Color.FromArgb(0x66, red, green, blue)));
+        Resources["PinnedRowBrush"] = Freeze(new SolidColorBrush(Color.FromArgb(0x0F, red, green, blue)));
+        Resources["PinBadgeBrush"] = Freeze(new SolidColorBrush(Color.FromArgb(0x24, red, green, blue)));
     }
 
     private static SolidColorBrush Freeze(SolidColorBrush brush)

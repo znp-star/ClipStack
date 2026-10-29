@@ -9,6 +9,7 @@ using System.Windows.Threading;
 using ClipStack.App.Interop;
 using ClipStack.Core.Interop;
 using ClipStack.Core.Logging;
+using ClipStack.Core.Models;
 using ClipStack.Core.Settings;
 using ClipStack.Core.Storage;
 
@@ -27,6 +28,8 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<ItemRow> _rows = [];
     private IntPtr _target;
     private Monitors.MonitorInfo _monitor;
+    private ClipType? _filter;
+    private bool _linksOnly;
     private bool _suppressDeactivate;
     private bool _ready;
 
@@ -56,6 +59,12 @@ public partial class MainWindow : Window
         if (!string.IsNullOrEmpty(SearchBox.Text))
         {
             SearchBox.Text = string.Empty;
+        }
+
+        // Every invocation starts from the full history, like Win+V.
+        if (FilterAll.IsChecked != true)
+        {
+            FilterAll.IsChecked = true;
         }
 
         RefreshItems();
@@ -102,7 +111,7 @@ public partial class MainWindow : Window
 
         var previousId = (ItemList.SelectedItem as ItemRow)?.Item.Id;
 
-        var items = _store.Query(SearchBox.Text, null, MaxRows);
+        var items = _store.Query(SearchBox.Text, _filter, MaxRows, _linksOnly);
 
         _rows.Clear();
         foreach (var item in items)
@@ -110,9 +119,11 @@ public partial class MainWindow : Window
             _rows.Add(new ItemRow(item));
         }
 
-        EmptyHint.Text = string.IsNullOrWhiteSpace(SearchBox.Text)
-            ? "还没有记录，复制点什么试试"
-            : "没有匹配的记录";
+        EmptyHint.Text = !string.IsNullOrWhiteSpace(SearchBox.Text)
+            ? "没有匹配的记录"
+            : _filter is not null
+                ? "这个分类还没有记录"
+                : "还没有记录，复制点什么试试";
         EmptyHint.Visibility = _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
         if (_rows.Count == 0)
@@ -242,10 +253,18 @@ public partial class MainWindow : Window
         SaveGeometry();
         Hide();
 
-        var result = PasteInvoker.Paste(row.Item.ToPastePayload(), _target);
+        var payload = row.Item.ToPastePayload();
+        if (payload.ImagePng is { Length: > 0 } png)
+        {
+            // Chromium-based apps ignore the raw PNG clipboard format; hand them DIB pixels too.
+            payload = payload.WithDib(DibConverter.FromPng(png));
+        }
+
+        var result = PasteInvoker.Paste(payload, _target);
 
         if (result.Outcome != PasteOutcome.Sent)
         {
+            Log.Warn($"Paste not delivered: {result.Reason}");
             // Nothing was typed into the target, so bring the panel back with the reason.
             ShowPanel(_target);
             SetStatus(result.Reason ?? "内容已复制到剪贴板");
@@ -266,8 +285,151 @@ public partial class MainWindow : Window
         ItemList.ScrollIntoView(ItemList.SelectedItem);
     }
 
+    private void TogglePinSelected()
+    {
+        if (ItemList.SelectedItem is not ItemRow row)
+        {
+            return;
+        }
+
+        var unpinning = row.Item.Pinned;
+
+        _store.SetPinned(row.Item.Id, !row.Item.Pinned, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        RefreshItems();
+
+        if (unpinning)
+        {
+            SelectPinnedOrFirst();
+        }
+    }
+
+    /// <summary>
+    /// After unpinning, the item drops out of the pinned block and lands somewhere in the time
+    /// flow; following it would throw the selection far down the list. Stay in the pinned block
+    /// instead, and once it is empty fall back to the first row below it.
+    /// </summary>
+    private void SelectPinnedOrFirst()
+    {
+        if (_rows.Count == 0)
+        {
+            return;
+        }
+
+        var target = _rows.FirstOrDefault(candidate => candidate.IsPinned);
+        if (target is not null)
+        {
+            ItemList.SelectedItem = target;
+        }
+        else
+        {
+            ItemList.SelectedIndex = 0;
+        }
+
+        ItemList.ScrollIntoView(ItemList.SelectedItem);
+    }
+
+    private void DeleteSelected()
+    {
+        if (ItemList.SelectedItem is not ItemRow row)
+        {
+            return;
+        }
+
+        var index = ItemList.SelectedIndex;
+        _store.Delete(row.Item.Id);
+        Log.Info($"Deleted item #{row.Item.Id}");
+
+        RefreshItems();
+
+        if (_rows.Count > 0)
+        {
+            ItemList.SelectedIndex = Math.Clamp(index, 0, _rows.Count - 1);
+            ItemList.ScrollIntoView(ItemList.SelectedItem);
+        }
+    }
+
+    /// <summary>
+    /// Edits the text of the selected item. Images and files have no editor in this version,
+    /// matching the plan's "no image or rich text editing" scope.
+    /// </summary>
+    private void EditSelected()
+    {
+        if (ItemList.SelectedItem is not ItemRow row)
+        {
+            return;
+        }
+
+        if (row.Item.Type != ClipType.Text)
+        {
+            SetStatus("只有文本条目可以编辑");
+            return;
+        }
+
+        // The dialog deactivates this window; without the flag the panel would hide behind it.
+        _suppressDeactivate = true;
+        try
+        {
+            var dialog = new EditWindow(row.Item.Text ?? string.Empty) { Owner = this };
+            if (dialog.ShowDialog() != true || dialog.EditedText == (row.Item.Text ?? string.Empty))
+            {
+                return;
+            }
+
+            var hash = ClipPayload.ForText(dialog.EditedText).ContentHash;
+            if (!_store.UpdateText(
+                    row.Item.Id,
+                    dialog.EditedText,
+                    hash,
+                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
+            {
+                SetStatus("相同内容已经存在，这次修改没有保存");
+                return;
+            }
+
+            RefreshItems();
+        }
+        finally
+        {
+            _suppressDeactivate = false;
+
+            var hwnd = new WindowInteropHelper(this).Handle;
+            WindowActivation.ForceForeground(hwnd);
+            Activate();
+            SearchBox.Focus();
+        }
+    }
+
+    private void CycleFilter(int delta)
+    {
+        var chips = new[] { FilterAll, FilterText, FilterLink, FilterImage, FilterFile };
+        var current = Array.FindIndex(chips, chip => chip.IsChecked == true);
+        var next = ((current < 0 ? 0 : current) + delta + chips.Length) % chips.Length;
+        chips[next].IsChecked = true;
+    }
+
+    private void FilterChip_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!_ready || sender is not RadioButton { Tag: string tag })
+        {
+            return;
+        }
+
+        _filter = tag switch
+        {
+            "text" or "link" => ClipType.Text,
+            "image" => ClipType.Image,
+            "file" => ClipType.File,
+            _ => null,
+        };
+        _linksOnly = tag == "link";
+
+        RefreshItems();
+    }
+
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        var modifiers = Keyboard.Modifiers;
+
         switch (e.Key)
         {
             case Key.Escape:
@@ -297,6 +459,31 @@ public partial class MainWindow : Window
                 MoveSelection(-1);
                 e.Handled = true;
                 break;
+
+            case Key.Delete when !SearchBox.IsKeyboardFocusWithin || SearchBox.Text.Length == 0:
+                DeleteSelected();
+                e.Handled = true;
+                break;
+
+            case Key.F2:
+                EditSelected();
+                e.Handled = true;
+                break;
+
+            case Key.P when modifiers == ModifierKeys.Control:
+                TogglePinSelected();
+                e.Handled = true;
+                break;
+
+            case Key.Tab when modifiers == ModifierKeys.Control:
+                CycleFilter(1);
+                e.Handled = true;
+                break;
+
+            case Key.Tab when modifiers == (ModifierKeys.Control | ModifierKeys.Shift):
+                CycleFilter(-1);
+                e.Handled = true;
+                break;
         }
     }
 
@@ -320,9 +507,38 @@ public partial class MainWindow : Window
 
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) => RefreshItems();
 
+    private void PinButton_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is ItemRow row)
+        {
+            _store.SetPinned(row.Item.Id, !row.Item.Pinned, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            RefreshItems();
+        }
+
+        e.Handled = true;
+    }
+
+    /// <summary>Buttons inside a row (the pin control) must not trigger the row's paste.</summary>
+    private static bool IsInsideButton(DependencyObject? node)
+    {
+        while (node is not null)
+        {
+            if (node is System.Windows.Controls.Primitives.ButtonBase)
+            {
+                return true;
+            }
+
+            node = node is Visual
+                ? VisualTreeHelper.GetParent(node)
+                : LogicalTreeHelper.GetParent(node);
+        }
+
+        return false;
+    }
+
     private void ItemList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.OriginalSource is not DependencyObject source)
+        if (e.OriginalSource is not DependencyObject source || IsInsideButton(source))
         {
             return;
         }

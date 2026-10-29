@@ -11,7 +11,7 @@ public sealed class ItemStore : IDisposable
 {
     private const string SelectColumns =
         "id, content_hash, type, text, html, rtf, image_path, source_app, source_title, " +
-        "created_at, last_used_at, use_count, pinned, pinned_at";
+        "created_at, last_used_at, use_count, pinned, pinned_at, is_link";
 
     private const string Schema = """
         CREATE TABLE IF NOT EXISTS items (
@@ -28,14 +28,15 @@ public sealed class ItemStore : IDisposable
             last_used_at INTEGER NOT NULL,
             use_count    INTEGER NOT NULL DEFAULT 0,
             pinned       INTEGER NOT NULL DEFAULT 0,
-            pinned_at    INTEGER
+            pinned_at    INTEGER,
+            is_link      INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE UNIQUE INDEX IF NOT EXISTS ux_items_hash   ON items(content_hash);
         CREATE INDEX        IF NOT EXISTS ix_items_recent ON items(last_used_at DESC);
         CREATE INDEX        IF NOT EXISTS ix_items_pinned ON items(pinned, pinned_at DESC);
 
-        PRAGMA user_version = 1;
+        PRAGMA user_version = 2;
         """;
 
     private readonly SqliteConnection _connection;
@@ -68,6 +69,63 @@ public sealed class ItemStore : IDisposable
         Execute("PRAGMA journal_mode = WAL;");
         Execute("PRAGMA synchronous = NORMAL;");
         Execute(Schema);
+        EnsureLinkColumn();
+        Execute("CREATE INDEX IF NOT EXISTS ix_items_link ON items(is_link, last_used_at DESC);");
+    }
+
+    /// <summary>
+    /// Adds the is_link column to databases created before it existed (user_version 1) and
+    /// classifies their text rows, so the 链接 filter works on an existing history.
+    /// </summary>
+    private void EnsureLinkColumn()
+    {
+        using (var check = _connection.CreateCommand())
+        {
+            check.CommandText = "PRAGMA table_info(items);";
+            using var reader = check.ExecuteReader();
+            var present = false;
+            while (reader.Read())
+            {
+                if (string.Equals(reader.GetString(1), "is_link", StringComparison.OrdinalIgnoreCase))
+                {
+                    present = true;
+                    break;
+                }
+            }
+
+            if (present)
+            {
+                return;
+            }
+        }
+
+        Execute("ALTER TABLE items ADD COLUMN is_link INTEGER NOT NULL DEFAULT 0;");
+
+        var textItems = new List<(long Id, string? Text)>();
+        using (var select = _connection.CreateCommand())
+        {
+            select.CommandText = "SELECT id, text FROM items WHERE type = 'text';";
+            using var reader = select.ExecuteReader();
+            while (reader.Read())
+            {
+                textItems.Add((reader.GetInt64(0), reader.IsDBNull(1) ? null : reader.GetString(1)));
+            }
+        }
+
+        using var update = _connection.CreateCommand();
+        update.CommandText = "UPDATE items SET is_link = 1 WHERE id = $id;";
+        var idParameter = update.Parameters.Add("$id", SqliteType.Integer);
+
+        foreach (var (id, text) in textItems)
+        {
+            if (!LinkText.Is(text))
+            {
+                continue;
+            }
+
+            idParameter.Value = id;
+            update.ExecuteNonQuery();
+        }
     }
 
     /// <summary>
@@ -87,13 +145,14 @@ public sealed class ItemStore : IDisposable
                 command.CommandText = """
                     INSERT INTO items
                         (content_hash, type, text, html, rtf, image_path, source_app, source_title,
-                         created_at, last_used_at, use_count, pinned)
+                         created_at, last_used_at, use_count, pinned, is_link)
                     VALUES
-                        ($hash, $type, $text, $html, $rtf, $image, $app, $title, $now, $now, 0, 0)
+                        ($hash, $type, $text, $html, $rtf, $image, $app, $title, $now, $now, 0, 0, $link)
                     ON CONFLICT(content_hash) DO UPDATE SET
                         last_used_at = $now,
                         use_count    = use_count + 1,
-                        image_path   = COALESCE(image_path, $image);
+                        image_path   = COALESCE(image_path, $image),
+                        is_link      = $link;
                     """;
                 command.Parameters.AddWithValue("$hash", payload.ContentHash);
                 command.Parameters.AddWithValue("$type", payload.Type.ToDbValue());
@@ -104,6 +163,9 @@ public sealed class ItemStore : IDisposable
                 command.Parameters.AddWithValue("$app", (object?)payload.SourceApp ?? DBNull.Value);
                 command.Parameters.AddWithValue("$title", (object?)payload.SourceTitle ?? DBNull.Value);
                 command.Parameters.AddWithValue("$now", nowMs);
+                command.Parameters.AddWithValue(
+                    "$link",
+                    payload.Type == ClipType.Text && LinkText.Is(payload.Text) ? 1 : 0);
                 command.ExecuteNonQuery();
             }
 
@@ -152,7 +214,7 @@ public sealed class ItemStore : IDisposable
         }
     }
 
-    public IReadOnlyList<ClipItem> Query(string? search, ClipType? type, int limit)
+    public IReadOnlyList<ClipItem> Query(string? search, ClipType? type, int limit, bool linksOnly = false)
     {
         var like = string.IsNullOrWhiteSpace(search) ? null : $"%{EscapeLike(search.Trim())}%";
 
@@ -163,6 +225,7 @@ public sealed class ItemStore : IDisposable
                 SELECT {SelectColumns}
                 FROM items
                 WHERE ($type IS NULL OR type = $type)
+                  AND ($linksOnly = 0 OR is_link = 1)
                   AND ($like IS NULL OR text LIKE $like ESCAPE '\')
                 ORDER BY pinned DESC,
                          COALESCE(CASE WHEN pinned = 1 THEN pinned_at END, last_used_at) DESC,
@@ -170,6 +233,7 @@ public sealed class ItemStore : IDisposable
                 LIMIT $limit;
                 """;
             command.Parameters.AddWithValue("$type", type is null ? DBNull.Value : type.Value.ToDbValue());
+            command.Parameters.AddWithValue("$linksOnly", linksOnly ? 1 : 0);
             command.Parameters.AddWithValue("$like", (object?)like ?? DBNull.Value);
             command.Parameters.AddWithValue("$limit", limit);
 
@@ -184,14 +248,65 @@ public sealed class ItemStore : IDisposable
         }
     }
 
+    /// <summary>
+    /// Replaces the text of a stored item. Pinned state and usage counters survive the edit.
+    /// Rich formats are dropped because the edit is plain text and keeping them would paste
+    /// content that no longer matches what the user sees. Returns false when another item
+    /// already owns the new content hash.
+    /// </summary>
+    public bool UpdateText(long id, string text, string contentHash, long nowMs)
+    {
+        lock (_gate)
+        {
+            using (var conflict = _connection.CreateCommand())
+            {
+                conflict.CommandText = "SELECT COUNT(*) FROM items WHERE content_hash = $hash AND id <> $id;";
+                conflict.Parameters.AddWithValue("$hash", contentHash);
+                conflict.Parameters.AddWithValue("$id", id);
+                if (Convert.ToInt32(conflict.ExecuteScalar()) > 0)
+                {
+                    return false;
+                }
+            }
+
+            using var command = _connection.CreateCommand();
+            command.CommandText = """
+                UPDATE items
+                SET text = $text, content_hash = $hash, html = NULL, rtf = NULL,
+                    is_link = $link, last_used_at = $now
+                WHERE id = $id;
+                """;
+            command.Parameters.AddWithValue("$text", text);
+            command.Parameters.AddWithValue("$hash", contentHash);
+            command.Parameters.AddWithValue("$link", LinkText.Is(text) ? 1 : 0);
+            command.Parameters.AddWithValue("$now", nowMs);
+            command.Parameters.AddWithValue("$id", id);
+            return command.ExecuteNonQuery() > 0;
+        }
+    }
+
     public void Delete(long id)
     {
         lock (_gate)
         {
+            string? imagePath = null;
+
+            using (var select = _connection.CreateCommand())
+            {
+                select.CommandText = "SELECT image_path FROM items WHERE id = $id;";
+                select.Parameters.AddWithValue("$id", id);
+                imagePath = select.ExecuteScalar() as string;
+            }
+
             using var command = _connection.CreateCommand();
             command.CommandText = "DELETE FROM items WHERE id = $id;";
             command.Parameters.AddWithValue("$id", id);
             command.ExecuteNonQuery();
+
+            if (imagePath is not null)
+            {
+                TryDeleteFile(imagePath);
+            }
         }
     }
 
@@ -322,6 +437,7 @@ public sealed class ItemStore : IDisposable
         UseCount = reader.GetInt32(11),
         Pinned = reader.GetInt64(12) != 0,
         PinnedAtMs = reader.IsDBNull(13) ? null : reader.GetInt64(13),
+        IsLink = reader.GetInt64(14) != 0,
     };
 
     private void Execute(string sql)

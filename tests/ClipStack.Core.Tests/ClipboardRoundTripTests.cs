@@ -1,6 +1,7 @@
 using ClipStack.Core.Clipboard;
 using ClipStack.Core.Images;
 using ClipStack.Core.Models;
+using System.Runtime.InteropServices;
 
 namespace ClipStack.Core.Tests;
 
@@ -52,6 +53,53 @@ public sealed class ClipboardRoundTripTests
             Assert.Equal(png, read.ImagePng);
         });
     }
+
+    [Fact]
+    public void AttachedDibRidesAlongWithThePngFormat()
+    {
+        RunOnSta(() =>
+        {
+            var png = PngEncoder.EncodeRgba(3, 2, new byte[24]);
+            var dib = DibImage.EncodeBgra32(3, 2, new byte[3 * 2 * 4]);
+
+            if (!ClipboardWriter.TryWrite(ClipPayload.ForImage(png).WithDib(dib)))
+            {
+                return;
+            }
+
+            Assert.True(IsClipboardFormatAvailable(CfDib), "CF_DIB missing from clipboard");
+            Assert.True(IsClipboardFormatAvailable(RegisterPngFormat()), "PNG format missing from clipboard");
+        });
+    }
+
+    [Fact]
+    public void EncodeBgra32BuildsABottomUp32BppDib()
+    {
+        // One row, two pixels: blue then red, as BGRA quads left-to-right.
+        var bgra = new byte[] { 255, 0, 0, 255, 0, 0, 255, 255 };
+        var dib = DibImage.EncodeBgra32(2, 1, bgra);
+
+        Assert.Equal(40 + 8, dib.Length);
+        // A single-row DIB stores that row left-to-right; bottom-up only matters per row.
+        Assert.Equal(255, dib[40]); // B
+        Assert.Equal(0, dib[41]);   // G
+        Assert.Equal(0, dib[42]);   // R
+        Assert.Equal(255, dib[43]); // A
+        Assert.Equal(0, dib[44]);
+        Assert.Equal(0, dib[45]);
+        Assert.Equal(255, dib[46]);
+        Assert.Equal(255, dib[47]);
+    }
+
+    private const uint CfDib = 8;
+
+    [DllImport("user32.dll")]
+    private static extern bool IsClipboardFormatAvailable(uint format);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint RegisterClipboardFormat(string name);
+
+    private static uint RegisterPngFormat() => RegisterClipboardFormat("PNG");
 
     /// <summary>
     /// The clipboard often stays locked for a moment after a write (the history service and

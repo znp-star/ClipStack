@@ -21,6 +21,13 @@ public sealed class ClipPayload
     public string? SourceApp { get; private init; }
     public string? SourceTitle { get; private init; }
 
+    /// <summary>
+    /// Packed CF_DIB pixels for image payloads. The PNG format alone is invisible to
+    /// Chromium-based apps, which build paste files from the DIB; callers that can decode
+    /// fill this in before the payload reaches the clipboard writer.
+    /// </summary>
+    public byte[]? ImageDib { get; private init; }
+
     public static ClipPayload ForText(string text, string? html = null, string? rtf = null) => new()
     {
         Type = ClipType.Text,
@@ -54,8 +61,24 @@ public sealed class ClipPayload
         Rtf = Rtf,
         FilePaths = FilePaths,
         ImagePng = ImagePng,
+        ImageDib = ImageDib,
         SourceApp = app,
         SourceTitle = title,
+    };
+
+    /// <summary>Attaches CF_DIB pixels to an image payload; other payload kinds ignore it.</summary>
+    public ClipPayload WithDib(byte[]? dib) => new()
+    {
+        Type = Type,
+        ContentHash = ContentHash,
+        Text = Text,
+        Html = Html,
+        Rtf = Rtf,
+        FilePaths = FilePaths,
+        ImagePng = ImagePng,
+        ImageDib = Type == ClipType.Image ? dib : null,
+        SourceApp = SourceApp,
+        SourceTitle = SourceTitle,
     };
 
     private static string HashString(ClipType type, string canonical) =>

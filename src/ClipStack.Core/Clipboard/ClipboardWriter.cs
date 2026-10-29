@@ -38,6 +38,14 @@ public static class ClipboardWriter
                     {
                         return false;
                     }
+
+                    // Chromium-based apps build paste files from the DIB and ignore the raw
+                    // PNG format, so the pixels ride along in both shapes.
+                    if (payload.ImageDib is { Length: > 0 } dib
+                        && !SetBytes(NativeMethods.CF_DIB, dib))
+                    {
+                        Log.Warn("Failed to set CF_DIB; keeping PNG only");
+                    }
                 }
                 else if (payload.FilePaths is { Count: > 0 } files)
                 {

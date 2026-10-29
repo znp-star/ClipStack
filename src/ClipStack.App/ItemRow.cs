@@ -1,11 +1,15 @@
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Windows;
 using ClipStack.Core.Clipboard;
 using ClipStack.Core.Models;
 
 namespace ClipStack.App;
 
-/// <summary>A list row: the stored item plus its pre-rendered display strings.</summary>
+/// <summary>
+/// A list row: the stored item plus the one-line-per-item display data. Rows carry no
+/// source, time, size or type label — the panel is a picker, not a log viewer.
+/// </summary>
 public sealed class ItemRow
 {
     private static readonly Regex WhitespaceRun = new(@"\s{2,}", RegexOptions.Compiled);
@@ -14,22 +18,19 @@ public sealed class ItemRow
     {
         Item = item;
         ThumbnailPath = ResolveThumbnail(item);
-        Badge = item.Type == ClipType.File && ThumbnailPath is not null
-            ? "图片"
-            : item.Type switch
-            {
-                ClipType.Image => "图片",
-                ClipType.File => "文件",
-                _ => "文本",
-            };
         Preview = BuildPreview(item);
-        Meta = BuildMeta(item, ThumbnailPath);
     }
 
     public ClipItem Item { get; }
-    public string Badge { get; }
+
+    /// <summary>Row text, rendered as at most two wrapped lines.</summary>
     public string Preview { get; }
-    public string Meta { get; }
+
+    public bool IsPinned => Item.Pinned;
+
+    /// <summary>Image rows are the thumbnail alone; "图片" as text would say nothing.</summary>
+    public Visibility PreviewVisibility =>
+        Item.Type == ClipType.Image ? Visibility.Collapsed : Visibility.Visible;
 
     /// <summary>Local image file for the row thumbnail; bound directly by the row template.</summary>
     public string? ThumbnailPath { get; }
@@ -73,7 +74,7 @@ public sealed class ItemRow
 
         if (item.Type == ClipType.Image)
         {
-            return "图片";
+            return string.Empty;
         }
 
         var text = (item.Text ?? string.Empty)
@@ -86,48 +87,5 @@ public sealed class ItemRow
         return text.Length == 0
             ? "（空白内容）"
             : text.Length > 240 ? text[..240] + "…" : text;
-    }
-
-    private static string BuildMeta(ClipItem item, string? thumbnailPath)
-    {
-        var app = string.IsNullOrWhiteSpace(item.SourceApp) ? "未知来源" : item.SourceApp;
-        var age = DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeMilliseconds(item.LastUsedAtMs);
-
-        var time = age.TotalSeconds switch
-        {
-            < 60 => "刚刚",
-            < 3600 => $"{(int)age.TotalMinutes} 分钟前",
-            < 86400 => $"{(int)age.TotalHours} 小时前",
-            _ => $"{(int)age.TotalDays} 天前",
-        };
-
-        var sizeSource = thumbnailPath ?? (item.Type == ClipType.Image ? item.ImagePath : null);
-        var size = sizeSource is null ? null : FormatSize(sizeSource);
-        var middle = size is null ? time : $"{time} · {size}";
-
-        return item.Pinned ? $"已置顶 · {app}" : $"{app} · {middle}";
-    }
-
-    private static string? FormatSize(string? path)
-    {
-        try
-        {
-            if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            {
-                return null;
-            }
-
-            var bytes = new FileInfo(path).Length;
-            return bytes switch
-            {
-                < 1024 => $"{bytes} B",
-                < 1024 * 1024 => $"{bytes / 1024} KB",
-                _ => $"{bytes / (1024.0 * 1024.0):0.#} MB",
-            };
-        }
-        catch (IOException)
-        {
-            return null;
-        }
     }
 }

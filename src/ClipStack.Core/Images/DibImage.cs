@@ -16,6 +16,48 @@ public static class DibImage
     /// <summary>Refuse absurd sizes before allocating: 40 MP covers any multi-monitor screenshot.</summary>
     public const long MaxPixels = 40_000_000;
 
+    /// <summary>
+    /// Builds a packed CF_DIB (40-byte BITMAPINFOHEADER, 32bpp BI_RGB, bottom-up) from
+    /// BGRA pixel rows, so image payloads can ride both the PNG format and the DIB format.
+    /// WPF hands out Bgra32 rows top-down; the encoder flips them.
+    /// </summary>
+    public static byte[] EncodeBgra32(int width, int height, byte[] bgra)
+    {
+        if (width <= 0 || height <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(width), "DIB 尺寸无效");
+        }
+
+        if ((long)width * height > MaxPixels)
+        {
+            throw new ArgumentOutOfRangeException(nameof(height), "图片过大");
+        }
+
+        var stride = width * 4;
+        if (bgra.Length < (long)stride * height)
+        {
+            throw new ArgumentException("像素数据不足", nameof(bgra));
+        }
+
+        var dib = new byte[BitmapInfoHeaderSize + (long)stride * height];
+        BinaryPrimitives.WriteInt32LittleEndian(dib.AsSpan(0), BitmapInfoHeaderSize);
+        BinaryPrimitives.WriteInt32LittleEndian(dib.AsSpan(4), width);
+        BinaryPrimitives.WriteInt32LittleEndian(dib.AsSpan(8), height); // positive: bottom-up
+        BinaryPrimitives.WriteInt16LittleEndian(dib.AsSpan(12), 1);     // biPlanes
+        BinaryPrimitives.WriteInt16LittleEndian(dib.AsSpan(14), 32);    // biBitCount
+        BinaryPrimitives.WriteInt32LittleEndian(dib.AsSpan(16), BiRgb);
+        BinaryPrimitives.WriteInt32LittleEndian(dib.AsSpan(20), stride * height);
+
+        var target = BitmapInfoHeaderSize;
+        for (var y = height - 1; y >= 0; y--)
+        {
+            Array.Copy(bgra, (long)y * stride, dib, target, stride);
+            target += stride;
+        }
+
+        return dib;
+    }
+
     public static bool TryConvertToPng(ReadOnlySpan<byte> dib, out byte[] png, out string? reason)
     {
         png = [];
