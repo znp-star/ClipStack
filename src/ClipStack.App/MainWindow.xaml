@@ -171,6 +171,9 @@
                          ScrollViewer.VerticalScrollBarVisibility="Auto"
                          VirtualizingPanel.IsVirtualizing="True"
                          VirtualizingPanel.VirtualizationMode="Recycling"
+                         MouseMove="ItemList_MouseMove"
+                         MouseLeave="ItemList_MouseLeave"
+                         ScrollViewer.ScrollChanged="ItemList_ScrollChanged"
                          PreviewMouseLeftButtonUp="ItemList_PreviewMouseLeftButtonUp">
                     <ListBox.ItemContainerStyle>
                         <Style TargetType="ListBoxItem">
@@ -269,8 +272,11 @@
                                     </Border.Style>
                                 </Border>
 
-                                <!-- At most two lines, then an ellipsis; no source, time, size or type -->
-                                <TextBlock Grid.Column="1"
+                                <!-- At most two lines, then an ellipsis; no source, time, size or type.
+                                     Named so the tip can measure whether the two lines actually hold
+                                     the whole entry. -->
+                                <TextBlock x:Name="PreviewText"
+                                           Grid.Column="1"
                                            Text="{Binding Preview}"
                                            Visibility="{Binding PreviewVisibility}"
                                            VerticalAlignment="Center"
@@ -422,6 +428,52 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+
+            <!-- Row preview. A Popup rather than a ToolTip: the tip has to follow the keyboard
+                 selection, update when the pointer moves to another row, and close the moment the
+                 row it belongs to is no longer the one under the pointer or the one selected —
+                 none of which ToolTipService allows. Hit testing is off so it never swallows a
+                 click meant for the list underneath. -->
+            <Popup x:Name="RowTip"
+                   AllowsTransparency="True"
+                   Placement="Right"
+                   HorizontalOffset="10"
+                   VerticalOffset="0"
+                   StaysOpen="True"
+                   Focusable="False">
+                <Border Background="{DynamicResource SurfaceBrush}"
+                        BorderBrush="{DynamicResource EdgeBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="4"
+                        IsHitTestVisible="False">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="18"
+                                          ShadowDepth="3"
+                                          Direction="270"
+                                          Opacity="0.4"
+                                          Color="Black" />
+                    </Border.Effect>
+                    <Grid>
+                        <Image x:Name="TipImage"
+                               Stretch="Uniform"
+                               MaxWidth="520"
+                               MaxHeight="390"
+                               Visibility="Collapsed"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                        <TextBlock x:Name="TipText"
+                                   MaxWidth="520"
+                                   MaxHeight="440"
+                                   FontSize="12.5"
+                                   LineHeight="19"
+                                   LineStackingStrategy="BlockLineHeight"
+                                   TextWrapping="Wrap"
+                                   TextTrimming="CharacterEllipsis"
+                                   Visibility="Collapsed"
+                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                    </Grid>
+                </Border>
+            </Popup>
         </Grid>
     </Border>
 </Window>

@@ -1,6 +1,8 @@
 ﻿using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -21,12 +23,16 @@ public partial class MainWindow : Window
     private const double MinPanelWidth = 320;
     private const double MinPanelHeight = 240;
 
+    /// <summary>Characters the text tip shows before it stops. Pasted logs can be megabytes.</summary>
+    private const int TipTextLimit = 4000;
+
     private static readonly TimeSpan PanelAnimation = TimeSpan.FromMilliseconds(120);
 
     private readonly ItemStore _store;
     private readonly SettingsStore _settings;
     private readonly SensitiveQueue _queue;
     private readonly ObservableCollection<ItemRow> _rows = [];
+    private readonly DispatcherTimer _tipDelay = new() { Interval = TimeSpan.FromMilliseconds(280) };
     private Dictionary<HotkeyAction, HotkeyGesture> _hotkeys = Hotkeys.Resolve(null);
     private IntPtr _target;
     private Monitors.MonitorInfo _monitor;
@@ -35,6 +41,13 @@ public partial class MainWindow : Window
     private bool _sensitiveOnly;
     private bool _suppressDeactivate;
     private bool _ready;
+    private bool _previewTip = true;
+
+    // The row the tip is anchored to, and the one it is about to be. Keeping both lets a pointer
+    // move cancel a pending tip and close a visible one on the row it was opened for.
+    private FrameworkElement? _tipAnchor;
+    private ItemRow? _pendingRow;
+    private FrameworkElement? _pendingAnchor;
 
     public MainWindow(ItemStore store, SettingsStore settings, SensitiveQueue queue)
     {
@@ -47,6 +60,7 @@ public partial class MainWindow : Window
         PreviewKeyDown += OnPreviewKeyDown;
         Deactivated += OnDeactivated;
         SourceInitialized += OnSourceInitialized;
+        _tipDelay.Tick += OnTipDelayElapsed;
 
         _ready = true;
         UpdateHints();
@@ -65,6 +79,17 @@ public partial class MainWindow : Window
     /// <summary>Retunes the sensitive queue without a restart.</summary>
     public void ApplySensitiveTtl(int minutes) =>
         _queue.Ttl = TimeSpan.FromMinutes(Math.Clamp(minutes, 1, 60));
+
+    /// <summary>Turns the row preview tip on or off, closing one that is already up.</summary>
+    public void ApplyPreviewTip(bool enabled)
+    {
+        _previewTip = enabled;
+
+        if (!enabled)
+        {
+            HideRowTip();
+        }
+    }
 
     /// <summary>
     /// Shows a dialog owned by the panel without the panel hiding itself behind it — losing
@@ -160,6 +185,7 @@ public partial class MainWindow : Window
 
     public void HidePanel()
     {
+        HideRowTip();
         SaveGeometry();
         Hide();
     }
@@ -192,6 +218,9 @@ public partial class MainWindow : Window
                     .Concat(sensitive)
                     .OrderByDescending(item => item.LastUsedAtMs))
                 .Take(MaxRows);
+
+        // Rebuilding the rows invalidates the container the tip is anchored to.
+        HideRowTip();
 
         _rows.Clear();
         foreach (var item in visible)
@@ -348,6 +377,7 @@ public partial class MainWindow : Window
         }
 
         _suppressDeactivate = true;
+        HideRowTip();
         SaveGeometry();
         Hide();
 
@@ -381,6 +411,7 @@ public partial class MainWindow : Window
         var index = Math.Clamp(ItemList.SelectedIndex + delta, 0, _rows.Count - 1);
         ItemList.SelectedIndex = index;
         ItemList.ScrollIntoView(ItemList.SelectedItem);
+        UpdateTipForSelection();
     }
 
     private void TogglePinSelected()
@@ -694,6 +725,247 @@ public partial class MainWindow : Window
     }
 
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) => RefreshItems();
+
+    /// <summary>
+    /// Pointer over the list: show the preview for the row under the cursor, after a short delay so
+    /// sweeping across rows does not strobe. Moving onto a row with nothing to preview closes the
+    /// tip at once instead of leaving the previous row's preview on screen.
+    /// </summary>
+    private void ItemList_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (ItemsControl.ContainerFromElement(ItemList, e.OriginalSource as DependencyObject) is FrameworkElement container &&
+            container.DataContext is ItemRow row)
+        {
+            if (ReferenceEquals(container, _tipAnchor) || ReferenceEquals(container, _pendingAnchor))
+            {
+                return;
+            }
+
+            if (NeedsTip(row, container))
+            {
+                _pendingRow = row;
+                _pendingAnchor = container;
+                _tipDelay.Stop();
+                _tipDelay.Start();
+            }
+            else
+            {
+                HideRowTip();
+            }
+
+            return;
+        }
+
+        HideRowTip();
+    }
+
+    private void ItemList_MouseLeave(object sender, MouseEventArgs e) => HideRowTip();
+
+    /// <summary>Row containers move under the tip while scrolling, so the tip would drift: drop it.</summary>
+    private void ItemList_ScrollChanged(object sender, ScrollChangedEventArgs e) => HideRowTip();
+
+    private void OnTipDelayElapsed(object? sender, EventArgs e)
+    {
+        _tipDelay.Stop();
+
+        if (_pendingRow is { } row && _pendingAnchor is { } anchor)
+        {
+            ShowRowTip(row, anchor);
+        }
+    }
+
+    /// <summary>Keyboard navigation jumps the selection, so the tip follows it without the delay.</summary>
+    private void UpdateTipForSelection()
+    {
+        if (ItemList.SelectedItem is not ItemRow row)
+        {
+            HideRowTip();
+            return;
+        }
+
+        // A row that was only just scrolled into view has no container until layout runs.
+        ItemList.UpdateLayout();
+
+        if (ItemList.ItemContainerGenerator.ContainerFromItem(row) is FrameworkElement container &&
+            NeedsTip(row, container))
+        {
+            ShowRowTip(row, container);
+        }
+        else
+        {
+            HideRowTip();
+        }
+    }
+
+    /// <summary>
+    /// A row earns a tip for one of two reasons: it holds an image worth seeing larger, or its text
+    /// does not fit in the two lines the row allows.
+    /// </summary>
+    private bool NeedsTip(ItemRow row, FrameworkElement container)
+    {
+        if (!_previewTip)
+        {
+            return false;
+        }
+
+        if (row.Thumbnail is not null)
+        {
+            return true;
+        }
+
+        return row.IsPreviewTrimmed || IsTextClipped(FindPreviewText(container));
+    }
+
+    private void ShowRowTip(ItemRow row, FrameworkElement anchor)
+    {
+        _tipDelay.Stop();
+        _pendingRow = null;
+        _pendingAnchor = null;
+
+        if (!_previewTip)
+        {
+            return;
+        }
+
+        ImageSource? image = row.Thumbnail is null ? null : row.PreviewImage;
+        string? text = null;
+
+        if (image is null)
+        {
+            text = ClipTipText(row.Item.Text);
+            if (string.IsNullOrEmpty(text))
+            {
+                HideRowTip();
+                return;
+            }
+        }
+
+        TipImage.Source = image;
+        TipImage.Visibility = image is null ? Visibility.Collapsed : Visibility.Visible;
+        TipText.Text = text;
+        TipText.Visibility = text is null ? Visibility.Collapsed : Visibility.Visible;
+
+        FitTipToScreen(anchor);
+
+        _tipAnchor = anchor;
+        RowTip.IsOpen = true;
+    }
+
+    private void HideRowTip()
+    {
+        _tipDelay.Stop();
+        _pendingRow = null;
+        _pendingAnchor = null;
+
+        if (RowTip.IsOpen)
+        {
+            RowTip.IsOpen = false;
+        }
+
+        if (_tipAnchor is null)
+        {
+            return;
+        }
+
+        _tipAnchor = null;
+
+        // Drop the decoded pixels with the tip; the row keeps its own cache for the next visit.
+        TipImage.Source = null;
+        TipText.Text = null;
+    }
+
+    /// <summary>
+    /// Sizes the tip to the room beside the panel and puts it on the side that has more of that
+    /// room. Anchoring to the panel instead of the row keeps the tip outside the panel: anchored to
+    /// a row, "place on the left" means "over the list".
+    /// </summary>
+    private void FitTipToScreen(FrameworkElement anchor)
+    {
+        var work = SystemParameters.WorkArea;
+        var gap = RowTip.HorizontalOffset;
+        var right = work.Right - (Left + ActualWidth) - gap;
+        var left = Left - work.Left - gap;
+
+        // Right first: it is the side the list reads towards. The left side only wins when the
+        // right one is too narrow to be worth it, because flipping sides on a near-tie looks random.
+        var useRight = right >= 300 || right >= left;
+        var width = Math.Clamp(useRight ? right : left, 240, 520);
+
+        TipImage.MaxWidth = width;
+        TipText.MaxWidth = width;
+
+        RowTip.PlacementTarget = this;
+        RowTip.Placement = useRight ? PlacementMode.Right : PlacementMode.Left;
+        RowTip.VerticalOffset = Math.Max(0, anchor.TranslatePoint(new Point(0, 0), this).Y - 8);
+    }
+
+    /// <summary>The row's preview block, found by name because it lives inside the row template.</summary>
+    private static TextBlock? FindPreviewText(DependencyObject root)
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is TextBlock { Name: "PreviewText" } block)
+            {
+                return block;
+            }
+
+            if (FindPreviewText(child) is { } nested)
+            {
+                return nested;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether the two-line block is actually cutting the entry off. Measured with FormattedText so
+    /// the block's own layout is never disturbed; MaxHeight is two lines of LineHeight.
+    /// </summary>
+    private static bool IsTextClipped(TextBlock? block)
+    {
+        if (block is null || string.IsNullOrEmpty(block.Text) || block.ActualWidth <= 0)
+        {
+            return false;
+        }
+
+        if (double.IsNaN(block.MaxHeight))
+        {
+            return false;
+        }
+
+        var typeface = new Typeface(block.FontFamily, block.FontStyle, block.FontWeight, block.FontStretch);
+        var formatted = new FormattedText(
+            block.Text,
+            CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight,
+            typeface,
+            block.FontSize,
+            Brushes.Black,
+            VisualTreeHelper.GetDpi(block).PixelsPerDip)
+        {
+            MaxTextWidth = block.ActualWidth,
+        };
+
+        return formatted.Height > block.MaxHeight;
+    }
+
+    /// <summary>
+    /// Full text for the tip, capped: a pasted log can be megabytes, and a tip nobody can reach the
+    /// end of is worse than one that says it stopped.
+    /// </summary>
+    private static string? ClipTipText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        text = text.Trim();
+        return text.Length <= TipTextLimit ? text : text[..TipTextLimit] + "\n…（内容过长，已截断）";
+    }
 
     private void PinButton_Click(object sender, RoutedEventArgs e)
     {

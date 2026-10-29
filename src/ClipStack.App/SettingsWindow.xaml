@@ -192,6 +192,14 @@
                                  Foreground="{DynamicResource TextPrimaryBrush}" />
                 </StackPanel>
 
+                <TextBlock Text="面板" Style="{StaticResource SectionHeader}" />
+                <CheckBox x:Name="PreviewTipCheck"
+                          Content="悬停或选中条目时显示预览浮层"
+                          Foreground="{DynamicResource TextPrimaryBrush}" />
+                <TextBlock Text="图片条目展开成大图；超过两行的文本展开全文。浮层出现在面板外侧。"
+                           Style="{StaticResource Hint}"
+                           Margin="0,3,0,0" />
+
                 <TextBlock Text="快捷键" Style="{StaticResource SectionHeader}" />
                 <TextBlock Text="点一下键位框再按键即可改绑；Esc 取消，Backspace 清空。全局动作至少要带一个修饰键。"
                            Style="{StaticResource Hint}"

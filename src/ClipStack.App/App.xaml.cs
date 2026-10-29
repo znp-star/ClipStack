@@ -79,6 +79,7 @@ public partial class App : Application
         _panel = new MainWindow(_store, _settings, _queue);
         _panel.Closed += (_, _) => Shutdown();
         _panel.ApplyHotkeys(_hotkeys);
+        _panel.ApplyPreviewTip(_settings.Current.ShowPreviewTip);
         _panel.ClearHistoryRequested += ClearHistory;
 
         _monitor = new ClipboardMonitor();
@@ -167,12 +168,14 @@ public partial class App : Application
         _settings.Current.RetentionDays = dialog.RetentionDays;
         _settings.Current.SensitiveTtlMinutes = dialog.SensitiveTtlMinutes;
         _settings.Current.Autostart = dialog.Autostart;
+        _settings.Current.ShowPreviewTip = dialog.ShowPreviewTip;
         _settings.Current.Theme = dialog.Theme;
         _settings.Current.Hotkeys = dialog.HotkeyMap;
         _settings.Save();
 
         _hotkeys = Hotkeys.Resolve(_settings.Current.Hotkeys);
         _panel.ApplyHotkeys(_hotkeys);
+        _panel.ApplyPreviewTip(dialog.ShowPreviewTip);
         _panel.ApplySensitiveTtl(dialog.SensitiveTtlMinutes);
         ThemeManager.Apply(_settings.Current.Theme);
         ApplyAutostart();

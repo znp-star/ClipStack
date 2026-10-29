@@ -31,6 +31,7 @@ public partial class SettingsWindow : Window
         RetentionBox.Text = current.RetentionDays.ToString();
         SensitiveBox.Text = current.SensitiveTtlMinutes.ToString();
         AutostartCheck.IsChecked = current.Autostart;
+        PreviewTipCheck.IsChecked = current.ShowPreviewTip;
 
         switch (ThemeManager.Normalize(current.Theme))
         {
@@ -61,6 +62,9 @@ public partial class SettingsWindow : Window
     public int SensitiveTtlMinutes { get; private set; }
 
     public bool Autostart { get; private set; }
+
+    /// <summary>Whether the panel shows the row preview tip.</summary>
+    public bool ShowPreviewTip { get; private set; } = true;
 
     /// <summary>"system", "light" or "dark".</summary>
     public string Theme { get; private set; } = "system";
@@ -111,6 +115,7 @@ public partial class SettingsWindow : Window
         RetentionDays = days;
         SensitiveTtlMinutes = minutes;
         Autostart = AutostartCheck.IsChecked == true;
+        ShowPreviewTip = PreviewTipCheck.IsChecked == true;
         Theme = ThemeDark.IsChecked == true ? "dark" : ThemeLight.IsChecked == true ? "light" : "system";
         HotkeyMap = Hotkeys.ToSettings(table);
 

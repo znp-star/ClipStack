@@ -22,6 +22,12 @@ public sealed class AppSettings
     public string Theme { get; set; } = "system";
     public bool Autostart { get; set; } = true;
 
+    /// <summary>
+    /// Whether hovering or selecting a row shows the preview tip. On by default; the tip is the one
+    /// piece of the panel that covers other windows, so it has to be switchable off.
+    /// </summary>
+    public bool ShowPreviewTip { get; set; } = true;
+
     /// <summary>Keyed by monitor device name, e.g. <c>\\.\DISPLAY1</c>.</summary>
     public Dictionary<string, PanelGeometry> PanelGeometry { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
