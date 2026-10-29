@@ -20,12 +20,16 @@ public sealed class ItemRow
         };
         Preview = BuildPreview(item);
         Meta = BuildMeta(item);
+        ThumbnailPath = item.Type == ClipType.Image && File.Exists(item.ImagePath) ? item.ImagePath : null;
     }
 
     public ClipItem Item { get; }
     public string Badge { get; }
     public string Preview { get; }
     public string Meta { get; }
+
+    /// <summary>Local PNG for image items; bound directly by the row template.</summary>
+    public string? ThumbnailPath { get; }
 
     private static string BuildPreview(ClipItem item)
     {
@@ -42,6 +46,11 @@ public sealed class ItemRow
             return paths.Length > 2 ? $"{preview} 等 {paths.Length} 个文件" : preview;
         }
 
+        if (item.Type == ClipType.Image)
+        {
+            return "图片";
+        }
+
         var text = (item.Text ?? string.Empty)
             .Replace("\r\n", " ")
             .Replace('\n', ' ')
@@ -49,12 +58,9 @@ public sealed class ItemRow
             .Replace('\t', ' ');
         text = WhitespaceRun.Replace(text, " ").Trim();
 
-        if (text.Length == 0)
-        {
-            return item.Type == ClipType.Image ? "（图片）" : "（空白内容）";
-        }
-
-        return text.Length > 240 ? text[..240] + "…" : text;
+        return text.Length == 0
+            ? "（空白内容）"
+            : text.Length > 240 ? text[..240] + "…" : text;
     }
 
     private static string BuildMeta(ClipItem item)
@@ -70,6 +76,32 @@ public sealed class ItemRow
             _ => $"{(int)age.TotalDays} 天前",
         };
 
-        return item.Pinned ? $"已置顶 · {app}" : $"{app} · {time}";
+        var size = item.Type == ClipType.Image ? FormatSize(item.ImagePath) : null;
+        var middle = size is null ? time : $"{time} · {size}";
+
+        return item.Pinned ? $"已置顶 · {app}" : $"{app} · {middle}";
+    }
+
+    private static string? FormatSize(string? path)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            {
+                return null;
+            }
+
+            var bytes = new FileInfo(path).Length;
+            return bytes switch
+            {
+                < 1024 => $"{bytes} B",
+                < 1024 * 1024 => $"{bytes / 1024} KB",
+                _ => $"{bytes / (1024.0 * 1024.0):0.#} MB",
+            };
+        }
+        catch (IOException)
+        {
+            return null;
+        }
     }
 }

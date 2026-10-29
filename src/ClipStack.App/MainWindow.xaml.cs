@@ -4,10 +4,12 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using ClipStack.App.Interop;
 using ClipStack.Core.Interop;
 using ClipStack.Core.Logging;
+using ClipStack.Core.Settings;
 using ClipStack.Core.Storage;
 
 namespace ClipStack.App;
@@ -15,22 +17,29 @@ namespace ClipStack.App;
 public partial class MainWindow : Window
 {
     private const int MaxRows = 200;
+    private const double MinPanelWidth = 320;
+    private const double MinPanelHeight = 240;
+
+    private static readonly TimeSpan PanelAnimation = TimeSpan.FromMilliseconds(120);
 
     private readonly ItemStore _store;
+    private readonly SettingsStore _settings;
     private readonly ObservableCollection<ItemRow> _rows = [];
     private IntPtr _target;
+    private Monitors.MonitorInfo _monitor;
     private bool _suppressDeactivate;
     private bool _ready;
 
-    public MainWindow(ItemStore store)
+    public MainWindow(ItemStore store, SettingsStore settings)
     {
         _store = store;
+        _settings = settings;
         InitializeComponent();
 
         ItemList.ItemsSource = _rows;
         PreviewKeyDown += OnPreviewKeyDown;
         Deactivated += OnDeactivated;
-        SourceInitialized += (_, _) => DwmInterop.ApplyRoundedCorners(new WindowInteropHelper(this).Handle);
+        SourceInitialized += OnSourceInitialized;
 
         _ready = true;
     }
@@ -51,10 +60,14 @@ public partial class MainWindow : Window
 
         RefreshItems();
 
+        // Create the handle first so placement happens while the panel is still invisible.
+        var hwnd = new WindowInteropHelper(this).EnsureHandle();
+        PlaceOnMonitor(hwnd);
+
         Show();
 
         // Windows may refuse the activation; force it so the panel can take key input.
-        WindowActivation.ForceForeground(new WindowInteropHelper(this).Handle);
+        WindowActivation.ForceForeground(hwnd);
         Activate();
         SearchBox.Focus();
         Keyboard.Focus(SearchBox);
@@ -63,9 +76,15 @@ public partial class MainWindow : Window
         {
             ItemList.SelectedIndex = 0;
         }
+
+        AnimateIn();
     }
 
-    public void HidePanel() => Hide();
+    public void HidePanel()
+    {
+        SaveGeometry();
+        Hide();
+    }
 
     public void SetStatus(string message)
     {
@@ -118,6 +137,98 @@ public partial class MainWindow : Window
         ItemList.ScrollIntoView(ItemList.SelectedItem);
     }
 
+    private void OnSourceInitialized(object? sender, EventArgs e)
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        DwmInterop.ApplyRoundedCorners(hwnd);
+
+        // Without Mica (older Windows) the translucent surface would show the raw glass,
+        // so fall back to an opaque panel background.
+        var mica = DwmInterop.TryApplyMica(hwnd, dark: false);
+        Log.Info($"Panel backdrop: {(mica ? "Mica" : "opaque fallback")}");
+        if (!mica)
+        {
+            RootBorder.Background = (Brush)FindResource("SurfaceBrush");
+        }
+    }
+
+    /// <summary>Restores the remembered bounds for this monitor, or centres the panel on it.</summary>
+    private void PlaceOnMonitor(IntPtr hwnd)
+    {
+        _monitor = Monitors.ForWindow(hwnd);
+        var scale = _monitor.Scale;
+
+        MaxWidth = _monitor.WorkWidth * 0.7 / scale;
+        MaxHeight = _monitor.WorkHeight * 0.7 / scale;
+        MinWidth = MinPanelWidth;
+        MinHeight = MinPanelHeight;
+
+        var hasSaved = _monitor.Device.Length > 0
+            && _settings.Current.PanelGeometry.TryGetValue(_monitor.Device, out var saved)
+            && saved.Width >= MinPanelWidth && saved.Height >= MinPanelHeight;
+
+        if (hasSaved)
+        {
+            var geometry = _settings.Current.PanelGeometry[_monitor.Device];
+            Width = Math.Min(geometry.Width / scale, MaxWidth);
+            Height = Math.Min(geometry.Height / scale, MaxHeight);
+            Left = Clamp(geometry.X / scale, _monitor.WorkX / scale, _monitor.WorkX / scale + MaxWidth - Width);
+            Top = Clamp(geometry.Y / scale, _monitor.WorkY / scale, _monitor.WorkY / scale + MaxHeight - Height);
+            return;
+        }
+
+        Width = Math.Min(DefaultWidth, MaxWidth);
+        Height = Math.Min(DefaultHeight, MaxHeight);
+        Left = (_monitor.WorkX + (_monitor.WorkWidth - Width * scale) / 2) / scale;
+        Top = (_monitor.WorkY + (_monitor.WorkHeight - Height * scale) / 2) / scale;
+    }
+
+    private const double DefaultWidth = 420;
+    private const double DefaultHeight = 520;
+
+    private static double Clamp(double value, double min, double max) =>
+        max < min ? min : Math.Clamp(value, min, max);
+
+    private void SaveGeometry()
+    {
+        var monitor = _monitor.Device.Length > 0
+            ? _monitor
+            : Monitors.ForWindow(new WindowInteropHelper(this).Handle);
+        if (monitor.Device.Length == 0)
+        {
+            return;
+        }
+
+        var scale = monitor.Scale;
+        _settings.Current.PanelGeometry[monitor.Device] = new PanelGeometry
+        {
+            X = Math.Round(Left * scale),
+            Y = Math.Round(Top * scale),
+            Width = Math.Round(Width * scale),
+            Height = Math.Round(Height * scale),
+            Dpi = monitor.Dpi,
+        };
+
+        _settings.Save();
+    }
+
+    private void AnimateIn()
+    {
+        RootBorder.BeginAnimation(OpacityProperty, null);
+        PanelOffset.BeginAnimation(TranslateTransform.YProperty, null);
+
+        RootBorder.Opacity = 0;
+        PanelOffset.Y = 8;
+
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        RootBorder.BeginAnimation(
+            OpacityProperty,
+            new DoubleAnimation(0, 1, PanelAnimation) { EasingFunction = ease });
+        PanelOffset.BeginAnimation(
+            TranslateTransform.YProperty,
+            new DoubleAnimation(8, 0, PanelAnimation) { EasingFunction = ease });
+    }
+
     private void PasteSelected()
     {
         if (ItemList.SelectedItem is not ItemRow row)
@@ -128,6 +239,7 @@ public partial class MainWindow : Window
         _store.Touch(row.Item.Id, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
         _suppressDeactivate = true;
+        SaveGeometry();
         Hide();
 
         var result = PasteInvoker.Paste(row.Item.ToPastePayload(), _target);
@@ -165,7 +277,7 @@ public partial class MainWindow : Window
                 }
                 else
                 {
-                    Hide();
+                    HidePanel();
                 }
 
                 e.Handled = true;
@@ -201,7 +313,7 @@ public partial class MainWindow : Window
         {
             if (!_suppressDeactivate && IsVisible && !IsActive)
             {
-                Hide();
+                HidePanel();
             }
         }), DispatcherPriority.Background);
     }
@@ -250,6 +362,12 @@ public partial class MainWindow : Window
         {
             // The button was released before the drag started; harmless.
         }
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        SaveGeometry();
+        base.OnClosed(e);
     }
 
     private static bool IsDescendantOf(DependencyObject? node, DependencyObject ancestor)

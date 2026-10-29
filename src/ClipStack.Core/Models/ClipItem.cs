@@ -22,6 +22,17 @@ public sealed class ClipItem
     {
         ClipType.File => ClipPayload.ForFiles((Text ?? string.Empty)
             .Split("\r\n", StringSplitOptions.RemoveEmptyEntries)),
+        ClipType.Image => ClipPayload.ForImage(ReadImage()),
         _ => ClipPayload.ForText(Text ?? string.Empty, Html, Rtf),
     };
+
+    private byte[] ReadImage()
+    {
+        if (string.IsNullOrEmpty(ImagePath) || !File.Exists(ImagePath))
+        {
+            return [];
+        }
+
+        return File.ReadAllBytes(ImagePath);
+    }
 }

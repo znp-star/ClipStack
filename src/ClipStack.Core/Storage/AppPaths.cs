@@ -11,6 +11,7 @@ public static class AppPaths
         ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClipStack");
 
     public static string Database => Path.Combine(Root, "clipstack.db");
+    public static string Settings => Path.Combine(Root, "settings.json");
     public static string Images => Path.Combine(Root, "images");
     public static string Logs => Path.Combine(Root, "logs");
 

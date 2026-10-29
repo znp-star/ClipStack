@@ -14,6 +14,10 @@ public sealed class ClipPayload
     public string? Html { get; private init; }
     public string? Rtf { get; private init; }
     public IReadOnlyList<string>? FilePaths { get; private init; }
+
+    /// <summary>PNG bytes for image items; persisted as a file rather than a database blob.</summary>
+    public byte[]? ImagePng { get; private init; }
+
     public string? SourceApp { get; private init; }
     public string? SourceTitle { get; private init; }
 
@@ -23,7 +27,7 @@ public sealed class ClipPayload
         Text = text,
         Html = html,
         Rtf = rtf,
-        ContentHash = Hash(ClipType.Text, text),
+        ContentHash = HashString(ClipType.Text, text),
     };
 
     public static ClipPayload ForFiles(IReadOnlyList<string> paths) => new()
@@ -31,7 +35,14 @@ public sealed class ClipPayload
         Type = ClipType.File,
         FilePaths = paths,
         Text = string.Join("\r\n", paths),
-        ContentHash = Hash(ClipType.File, string.Join("\n", paths)),
+        ContentHash = HashString(ClipType.File, string.Join("\n", paths)),
+    };
+
+    public static ClipPayload ForImage(byte[] png) => new()
+    {
+        Type = ClipType.Image,
+        ImagePng = png,
+        ContentHash = HashBytes(ClipType.Image, png),
     };
 
     public ClipPayload WithSource(string? app, string? title) => new()
@@ -42,13 +53,20 @@ public sealed class ClipPayload
         Html = Html,
         Rtf = Rtf,
         FilePaths = FilePaths,
+        ImagePng = ImagePng,
         SourceApp = app,
         SourceTitle = title,
     };
 
-    private static string Hash(ClipType type, string canonical)
+    private static string HashString(ClipType type, string canonical) =>
+        HashBytes(type, Encoding.UTF8.GetBytes(canonical));
+
+    private static string HashBytes(ClipType type, ReadOnlySpan<byte> content)
     {
-        var bytes = Encoding.UTF8.GetBytes($"{(int)type}:{canonical}");
-        return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        var prefix = Encoding.UTF8.GetBytes($"{(int)type}:");
+        var buffer = new byte[prefix.Length + content.Length];
+        prefix.CopyTo(buffer, 0);
+        content.CopyTo(buffer.AsSpan(prefix.Length));
+        return Convert.ToHexString(SHA256.HashData(buffer)).ToLowerInvariant();
     }
 }

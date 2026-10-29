@@ -31,9 +31,19 @@ public static class ClipboardWriter
                     return false;
                 }
 
-                if (!string.IsNullOrEmpty(payload.Text) && !SetUnicodeText(payload.Text))
+                if (payload.ImagePng is { Length: > 0 } image)
                 {
-                    return false;
+                    if (!SetBytes(ClipboardFormats.Png, image))
+                    {
+                        return false;
+                    }
+                }
+                else if (!string.IsNullOrEmpty(payload.Text))
+                {
+                    if (!SetUnicodeText(payload.Text))
+                    {
+                        return false;
+                    }
                 }
 
                 SetIgnoreMarker();
@@ -51,8 +61,14 @@ public static class ClipboardWriter
 
     private static bool SetUnicodeText(string text)
     {
-        var byteCount = (text.Length + 1) * sizeof(char);
-        var handle = NativeMethods.GlobalAlloc(NativeMethods.GMEM_MOVEABLE, (UIntPtr)byteCount);
+        var chars = new char[text.Length + 1];
+        text.CopyTo(chars);
+        return SetBytes(NativeMethods.CF_UNICODETEXT, MemoryMarshal.AsBytes(chars.AsSpan()).ToArray());
+    }
+
+    private static bool SetBytes(uint format, byte[] bytes)
+    {
+        var handle = NativeMethods.GlobalAlloc(NativeMethods.GMEM_MOVEABLE, (UIntPtr)bytes.Length);
         if (handle == IntPtr.Zero)
         {
             return false;
@@ -67,16 +83,14 @@ public static class ClipboardWriter
 
         try
         {
-            var chars = new char[text.Length + 1];
-            text.CopyTo(chars);
-            Marshal.Copy(chars, 0, pointer, chars.Length);
+            Marshal.Copy(bytes, 0, pointer, bytes.Length);
         }
         finally
         {
             NativeMethods.GlobalUnlock(handle);
         }
 
-        if (NativeMethods.SetClipboardData(NativeMethods.CF_UNICODETEXT, handle) == IntPtr.Zero)
+        if (NativeMethods.SetClipboardData(format, handle) == IntPtr.Zero)
         {
             NativeMethods.GlobalFree(handle);
             return false;

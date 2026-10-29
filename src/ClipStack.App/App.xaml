@@ -3,17 +3,20 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
-        <!-- Light palette; the theme manager swaps these in M5. -->
+        <!-- Light palette. The panel surface is translucent so the Mica backdrop shows through;
+             the accent brushes are replaced at startup with the user's system accent. -->
         <SolidColorBrush x:Key="SurfaceBrush" Color="#F7F7F9" />
-        <SolidColorBrush x:Key="CardBrush" Color="#FFFFFF" />
-        <SolidColorBrush x:Key="EdgeBrush" Color="#E3E3E8" />
+        <SolidColorBrush x:Key="PanelSurfaceBrush" Color="#D9FFFFFF" />
+        <SolidColorBrush x:Key="CardBrush" Color="#B3FFFFFF" />
+        <SolidColorBrush x:Key="EdgeBrush" Color="#24808080" />
         <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1B1B1F" />
         <SolidColorBrush x:Key="TextSecondaryBrush" Color="#6E6E76" />
         <SolidColorBrush x:Key="TextTertiaryBrush" Color="#9A9AA2" />
         <SolidColorBrush x:Key="AccentBrush" Color="#0067C0" />
         <SolidColorBrush x:Key="SelectionBrush" Color="#E6EFFA" />
-        <SolidColorBrush x:Key="HoverBrush" Color="#F0F0F3" />
-        <SolidColorBrush x:Key="BadgeBackgroundBrush" Color="#EEF1F6" />
+        <SolidColorBrush x:Key="SelectionEdgeBrush" Color="#400067C0" />
+        <SolidColorBrush x:Key="HoverBrush" Color="#18000000" />
+        <SolidColorBrush x:Key="BadgeBackgroundBrush" Color="#1A000000" />
         <SolidColorBrush x:Key="BadgeForegroundBrush" Color="#5B6472" />
     </Application.Resources>
 </Application>

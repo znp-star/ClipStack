@@ -9,6 +9,8 @@ internal static class NativeMethods
 
     public const uint CF_UNICODETEXT = 13;
     public const uint CF_HDROP = 15;
+    public const uint CF_DIB = 8;
+    public const uint CF_DIBV5 = 17;
 
     public const uint GMEM_MOVEABLE = 0x0002;
 

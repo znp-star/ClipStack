@@ -2,24 +2,41 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:ClipStack.App"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="ClipStack"
-        Width="460" Height="560"
+        Width="420" Height="520"
         MinWidth="320" MinHeight="240"
         WindowStyle="None"
-        ResizeMode="NoResize"
+        ResizeMode="CanResize"
+        Background="Transparent"
         ShowInTaskbar="False"
         Topmost="True"
         WindowStartupLocation="CenterScreen"
-        Background="{DynamicResource SurfaceBrush}"
         FontFamily="Microsoft YaHei UI, Segoe UI"
         FontSize="13"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True">
 
-    <Border Background="{DynamicResource SurfaceBrush}"
+    <!-- CaptionHeight 0 keeps every pixel under our own hit-testing (dragging is handled
+         in code), while ResizeBorderThickness gives the panel real resize borders. -->
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0"
+                            ResizeBorderThickness="6"
+                            GlassFrameThickness="-1"
+                            CornerRadius="0"
+                            UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
+
+    <Border x:Name="RootBorder"
+            Background="{DynamicResource PanelSurfaceBrush}"
             BorderBrush="{DynamicResource EdgeBrush}"
             BorderThickness="1"
-            CornerRadius="8">
+            CornerRadius="8"
+            RenderTransformOrigin="0.5,0.5">
+        <Border.RenderTransform>
+            <TranslateTransform x:Name="PanelOffset" />
+        </Border.RenderTransform>
+
         <Grid Margin="12">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -84,6 +101,8 @@
                                     <ControlTemplate TargetType="ListBoxItem">
                                         <Border x:Name="RowBorder"
                                                 Background="Transparent"
+                                                BorderBrush="Transparent"
+                                                BorderThickness="1"
                                                 CornerRadius="6"
                                                 Padding="10,8">
                                             <ContentPresenter />
@@ -96,6 +115,8 @@
                                             <Trigger Property="IsSelected" Value="True">
                                                 <Setter TargetName="RowBorder" Property="Background"
                                                         Value="{DynamicResource SelectionBrush}" />
+                                                <Setter TargetName="RowBorder" Property="BorderBrush"
+                                                        Value="{DynamicResource SelectionEdgeBrush}" />
                                             </Trigger>
                                         </ControlTemplate.Triggers>
                                     </ControlTemplate>
@@ -110,6 +131,7 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
 
                                 <Border Grid.Column="0"
@@ -134,6 +156,25 @@
                                                Foreground="{DynamicResource TextTertiaryBrush}"
                                                TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
+
+                                <!-- Thumbnail, only for image items -->
+                                <Border Grid.Column="2"
+                                        Width="52" Height="34"
+                                        Margin="10,0,0,0"
+                                        CornerRadius="4"
+                                        Background="{DynamicResource BadgeBackgroundBrush}"
+                                        ClipToBounds="True">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ThumbnailPath}" Value="{x:Null}">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <Image Source="{Binding ThumbnailPath}" Stretch="UniformToFill" />
+                                </Border>
                             </Grid>
                         </DataTemplate>
                     </ListBox.ItemTemplate>

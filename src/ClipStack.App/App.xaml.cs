@@ -1,11 +1,14 @@
 ﻿using System.Threading;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
+using ClipStack.App.Interop;
 using ClipStack.Core.Clipboard;
 using ClipStack.Core.Interop;
 using ClipStack.Core.Logging;
 using ClipStack.Core.Models;
+using ClipStack.Core.Settings;
 using ClipStack.Core.Storage;
 
 namespace ClipStack.App;
@@ -15,11 +18,9 @@ public partial class App : Application
     private const string MutexName = @"Local\ClipStack.SingleInstance";
     private const string ActivateEventName = @"Local\ClipStack.Activate";
 
-    /// <summary>Retention until the settings window lands in M5.</summary>
-    private const int DefaultRetentionDays = 2;
-
     private Mutex? _instanceMutex;
     private EventWaitHandle? _activateEvent;
+    private SettingsStore? _settings;
     private ItemStore? _store;
     private ClipboardMonitor? _monitor;
     private GlobalHotkey? _hotkey;
@@ -53,15 +54,19 @@ public partial class App : Application
 
         StartActivationListener();
 
-        _store = new ItemStore(AppPaths.Database);
+        _settings = new SettingsStore(AppPaths.Settings);
+        _settings.Load();
+        ApplyAccent();
+
+        _store = new ItemStore(AppPaths.Database, AppPaths.Images);
         var purged = _store.DeleteOlderThan(
-            DateTimeOffset.UtcNow.AddDays(-DefaultRetentionDays).ToUnixTimeMilliseconds());
+            DateTimeOffset.UtcNow.AddDays(-_settings.Current.RetentionDays).ToUnixTimeMilliseconds());
         if (purged > 0)
         {
             Log.Info($"Purged {purged} expired items");
         }
 
-        _panel = new MainWindow(_store);
+        _panel = new MainWindow(_store, _settings);
         _panel.Closed += (_, _) => Shutdown();
 
         _monitor = new ClipboardMonitor();
@@ -94,8 +99,26 @@ public partial class App : Application
         }
     }
 
-    private void OnClipboardChanged(object? sender, ClipPayload payload)
+    /// <summary>Replaces the accent brushes with the user's DWM accent colour.</summary>
+    private void ApplyAccent()
     {
+        var accent = DwmInterop.GetAccentColor();
+        var red = (byte)(accent >> 16);
+        var green = (byte)(accent >> 8);
+        var blue = (byte)accent;
+
+        Resources["AccentBrush"] = Freeze(new SolidColorBrush(Color.FromRgb(red, green, blue)));
+        Resources["SelectionBrush"] = Freeze(new SolidColorBrush(Color.FromArgb(0x2E, red, green, blue)));
+        Resources["SelectionEdgeBrush"] = Freeze(new SolidColorBrush(Color.FromArgb(0x66, red, green, blue)));
+    }
+
+    private static SolidColorBrush Freeze(SolidColorBrush brush)
+    {
+        brush.Freeze();
+        return brush;
+    }
+
+    private void OnClipboardChanged(object? sender, ClipPayload payload)    {
         if (_store is null)
         {
             return;

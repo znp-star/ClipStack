@@ -1,6 +1,6 @@
 # ClipStack — Windows 剪贴板管理器
 
-> 状态：M1 已实现（监听 / 入库 / 回贴链路打通），M2 起待开发
+> 状态：M1、M2 已实现（监听 / 入库 / 回贴 / 面板视觉 / 尺寸记忆 / 图片捕获），M3 起待开发
 > 目标平台：Windows 11（开发机 26200 x64）
 > 许可：MIT
 
@@ -275,7 +275,7 @@ UI 与 Win32 交互不铺自动化测试。
 | 阶段 | 内容 | 验收 |
 |---|---|---|
 | M1 ✅ | 监听、入库、粘贴链路 | 复制文本 → 出现在列表 → 选中粘贴回原窗口 |
-| M2 | 面板与搜索 | 快捷键唤出、实时过滤、↑↓/Enter/Esc |
+| M2 ✅ | 面板与搜索 | 快捷键唤出、实时过滤、↑↓/Enter/Esc |
 | M3 | 置顶、编辑、类型过滤 | 置顶区独立、编辑保存、过滤条可用 |
 | M4 | 敏感与过期 | 敏感项带角标不落库、过期自动清理 |
 | M5 | 设置与热键 | 9 个动作可改、冲突提示、主题三态 |
@@ -286,7 +286,17 @@ UI 与 Win32 交互不铺自动化测试。
 - 启动参数 `--silent`：不显示面板（供开机自启与自动化测试使用）。
 - 单次复制可能连发多条 `WM_CLIPBOARDUPDATE`，用「同哈希 800ms 内不重复入库」折叠。
 - 面板自身占据前台时，来源应用记为未知，避免把 `ClipStack` 记成来源。
-- 图片格式捕获留到 M2（DIB→PNG 需要图像栈）。
+
+### M2 实现备注
+
+- 面板改用 `WindowChrome`（`CaptionHeight=0`、`ResizeBorderThickness=6`、`GlassFrameThickness=-1`）：四边可拖拽缩放，且客户区交给 DWM 绘制 Mica。
+- Mica 用 `DWMWA_SYSTEMBACKDROP_TYPE = 2`（需 22621+）；不可用时回退为不透明 `SurfaceBrush`，日志记 `Panel backdrop`。
+- 选中色取自 DWM 系统强调色（`DwmGetColorizationColor`），透明度分层区分 hover / selected。
+- 位置尺寸按显示器设备名记忆，存**物理像素 + 该显示器 DPI**，恢复时按当前 DPI 换算，避免跨屏漂移；上限为工作区 70%。
+- 图片捕获：优先读 `PNG` 格式（原生保留 alpha），否则读 `CF_DIBV5`/`CF_DIB` 并自行转 PNG（`DibImage`，支持 24/32 位、BI_RGB/BI_BITFIELDS、上下行序），不引入 `System.Drawing`。
+- 图片按内容哈希落盘为 `images\<hash>.png`，同图只存一份；DB 仅存路径。
+- 已知限制：回写图片只放 `PNG` 剪贴板格式，未同时放 `CF_DIB`，个别只认 DIB 的老程序可能粘贴不了图片。
+- 来源应用图标尚未绘制，留到 M3 与条目编辑一并处理。
 
 ---
 

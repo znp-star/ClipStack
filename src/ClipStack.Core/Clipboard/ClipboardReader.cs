@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using ClipStack.Core.Images;
 using ClipStack.Core.Interop;
 using ClipStack.Core.Logging;
 using ClipStack.Core.Models;
@@ -14,6 +15,9 @@ public static class ClipboardReader
 {
     private const int OpenAttempts = 5;
     private const int OpenRetryDelayMs = 10;
+
+    /// <summary>Single-item ceiling, matching the default <c>max_item_bytes</c> setting.</summary>
+    public const long MaxImageBytes = 10 * 1024 * 1024;
 
     /// <summary>
     /// Returns null when the clipboard holds nothing we handle, or when the content
@@ -68,8 +72,74 @@ public static class ClipboardReader
                 ReadRegisteredString(ClipboardFormats.Rtf, Encoding.Latin1));
         }
 
-        // Images are captured in a later milestone (DIB -> PNG needs an image stack).
-        return null;
+        return ReadImage();
+    }
+
+    /// <summary>
+    /// Prefers the "PNG" format (already encoded, keeps alpha) and falls back to a raw
+    /// DIB, which is what most Windows applications publish.
+    /// </summary>
+    private static ClipPayload? ReadImage()
+    {
+        if (NativeMethods.IsClipboardFormatAvailable(ClipboardFormats.Png))
+        {
+            var png = ReadBytes(ClipboardFormats.Png);
+            if (png is { Length: > 0 } && png.LongLength <= MaxImageBytes && PngEncoder.LooksLikePng(png))
+            {
+                return ClipPayload.ForImage(png);
+            }
+        }
+
+        var dib = NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_DIBV5)
+            ? ReadBytes(NativeMethods.CF_DIBV5)
+            : NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_DIB)
+                ? ReadBytes(NativeMethods.CF_DIB)
+                : null;
+
+        if (dib is null || dib.LongLength <= 0)
+        {
+            return null;
+        }
+
+        if (!DibImage.TryConvertToPng(dib, out var converted, out var reason))
+        {
+            Log.Warn($"Skipped clipboard image: {reason}");
+            return null;
+        }
+
+        return converted.LongLength <= MaxImageBytes ? ClipPayload.ForImage(converted) : null;
+    }
+
+    private static byte[]? ReadBytes(uint format)
+    {
+        var handle = NativeMethods.GetClipboardData(format);
+        if (handle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        var pointer = NativeMethods.GlobalLock(handle);
+        if (pointer == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        try
+        {
+            var size = (long)NativeMethods.GlobalSize(handle);
+            if (size <= 0 || size > MaxImageBytes)
+            {
+                return null;
+            }
+
+            var bytes = new byte[size];
+            Marshal.Copy(pointer, bytes, 0, (int)size);
+            return bytes;
+        }
+        finally
+        {
+            NativeMethods.GlobalUnlock(handle);
+        }
     }
 
     private static string? ReadUnicodeText()

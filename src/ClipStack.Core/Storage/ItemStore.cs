@@ -39,16 +39,20 @@ public sealed class ItemStore : IDisposable
         """;
 
     private readonly SqliteConnection _connection;
+    private readonly string _imagesDirectory;
     private readonly object _gate = new();
     private bool _disposed;
 
-    public ItemStore(string databasePath)
+    public ItemStore(string databasePath, string? imagesDirectory = null)
     {
         var directory = Path.GetDirectoryName(Path.GetFullPath(databasePath));
         if (!string.IsNullOrEmpty(directory))
         {
             Directory.CreateDirectory(directory);
         }
+
+        _imagesDirectory = imagesDirectory ?? Path.Combine(directory ?? AppPaths.Root, "images");
+        Directory.CreateDirectory(_imagesDirectory);
 
         var connectionString = new SqliteConnectionStringBuilder
         {
@@ -74,6 +78,10 @@ public sealed class ItemStore : IDisposable
     {
         lock (_gate)
         {
+            var imagePath = payload.ImagePng is { Length: > 0 } image
+                ? SaveImageLocked(payload.ContentHash, image)
+                : null;
+
             using (var command = _connection.CreateCommand())
             {
                 command.CommandText = """
@@ -84,14 +92,15 @@ public sealed class ItemStore : IDisposable
                         ($hash, $type, $text, $html, $rtf, $image, $app, $title, $now, $now, 0, 0)
                     ON CONFLICT(content_hash) DO UPDATE SET
                         last_used_at = $now,
-                        use_count    = use_count + 1;
+                        use_count    = use_count + 1,
+                        image_path   = COALESCE(image_path, $image);
                     """;
                 command.Parameters.AddWithValue("$hash", payload.ContentHash);
                 command.Parameters.AddWithValue("$type", payload.Type.ToDbValue());
                 command.Parameters.AddWithValue("$text", (object?)payload.Text ?? DBNull.Value);
                 command.Parameters.AddWithValue("$html", (object?)payload.Html ?? DBNull.Value);
                 command.Parameters.AddWithValue("$rtf", (object?)payload.Rtf ?? DBNull.Value);
-                command.Parameters.AddWithValue("$image", DBNull.Value);
+                command.Parameters.AddWithValue("$image", (object?)imagePath ?? DBNull.Value);
                 command.Parameters.AddWithValue("$app", (object?)payload.SourceApp ?? DBNull.Value);
                 command.Parameters.AddWithValue("$title", (object?)payload.SourceTitle ?? DBNull.Value);
                 command.Parameters.AddWithValue("$now", nowMs);
@@ -274,8 +283,22 @@ public sealed class ItemStore : IDisposable
         }
     }
 
-    private ClipItem? GetByHashLocked(string hash)
+    /// <summary>Writes an image once per content hash; identical screenshots share one file.</summary>
+    private string SaveImageLocked(string hash, byte[] png)
     {
+        var path = Path.Combine(_imagesDirectory, hash + ".png");
+        if (File.Exists(path))
+        {
+            return path;
+        }
+
+        var temp = path + ".tmp";
+        File.WriteAllBytes(temp, png);
+        File.Move(temp, path, overwrite: true);
+        return path;
+    }
+
+    private ClipItem? GetByHashLocked(string hash)    {
         using var command = _connection.CreateCommand();
         command.CommandText = $"SELECT {SelectColumns} FROM items WHERE content_hash = $hash;";
         command.Parameters.AddWithValue("$hash", hash);
