@@ -10,10 +10,19 @@
     <AssemblyName>ClipStack</AssemblyName>
     <RootNamespace>ClipStack.App</RootNamespace>
     <Version>0.1.0</Version>
+    <ApplicationIcon>Assets\ClipStack.ico</ApplicationIcon>
+    <Product>ClipStack</Product>
+    <StartupObject>ClipStack.App.Program</StartupObject>
+    <Description>Windows 11 本地剪贴板管理器</Description>
+    <Authors>znp-star</Authors>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\ClipStack.Core\ClipStack.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Velopack" Version="1.2.161" />
   </ItemGroup>
 
 </Project>

@@ -27,6 +27,8 @@ public partial class App : Application
     private GlobalHotkey? _hotkey;
     private MainWindow? _panel;
     private TrayIcon? _tray;
+    private Updater? _updater;
+    private MenuItem? _updateItem;
     private DispatcherTimer? _cleanupTimer;
     private IntPtr _lastTarget;
     private volatile bool _shuttingDown;
@@ -96,6 +98,9 @@ public partial class App : Application
 
         CreateTray();
         StartCleanupTimer();
+
+        _updater = new Updater();
+        StartUpdateCheck();
 
         // --silent keeps the panel hidden on launch (needed for autostart later, and for tests).
         var silent = e.Args.Any(a => string.Equals(a, "--silent", StringComparison.OrdinalIgnoreCase));
@@ -366,6 +371,10 @@ public partial class App : Application
         var settings = new MenuItem { Header = "设置…" };
         settings.Click += (_, _) => OpenSettings();
 
+        var update = new MenuItem { Header = "检查更新…" };
+        update.Click += OnCheckUpdateClicked;
+        _updateItem = update;
+
         // A caption plus three short rows instead of "主题：" repeated three times: the same
         // grouping as a submenu, without a nested popup the flat template cannot host.
         var themeLabel = new MenuItem
@@ -396,6 +405,7 @@ public partial class App : Application
         menu.Items.Add(new Separator());
         menu.Items.Add(clear);
         menu.Items.Add(settings);
+        menu.Items.Add(update);
         menu.Items.Add(new Separator());
         menu.Items.Add(quit);
 
@@ -423,6 +433,131 @@ public partial class App : Application
         _settings.Save();
         ThemeManager.Apply(_settings.Current.Theme);
         Log.Info($"Theme set to {_settings.Current.Theme}");
+    }
+
+    private static string CurrentVersion =>
+        typeof(App).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+
+    /// <summary>
+    /// Asks the feed once, shortly after startup, so a new release is noticed without the user
+    /// having to look. Deliberately quiet: only the tray tooltip and the menu caption change.
+    /// </summary>
+    private void StartUpdateCheck()
+    {
+        if (_updater is not { IsInstalled: true })
+        {
+            return;
+        }
+
+        // Give the window and the clipboard monitor a moment before touching the network.
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
+        timer.Tick += async (_, _) =>
+        {
+            timer.Stop();
+            await CheckForUpdatesAsync(manual: false);
+        };
+        timer.Start();
+    }
+
+    private async void OnCheckUpdateClicked(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await CheckForUpdatesAsync(manual: true);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Update flow failed", ex);
+        }
+    }
+
+    private async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (_updater is null)
+        {
+            return;
+        }
+
+        if (!_updater.IsInstalled)
+        {
+            if (manual)
+            {
+                MessageBox.Show(
+                    "这一份不是通过安装包装的，没法自更新。\n先装一次 GitHub Releases 里的安装包，之后的版本就能自动升级。",
+                    "ClipStack",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+
+            return;
+        }
+
+        var version = await _updater.CheckAsync();
+
+        if (version is null)
+        {
+            if (manual)
+            {
+                MessageBox.Show(
+                    $"已经是最新版本（{CurrentVersion}）。",
+                    "ClipStack",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+
+            return;
+        }
+
+        if (_updateItem is not null)
+        {
+            _updateItem.Header = $"安装更新 v{version}…";
+        }
+
+        _tray?.SetTooltip($"ClipStack · 可更新到 {version}");
+
+        if (!manual)
+        {
+            Log.Info($"Update {version} available");
+            return;
+        }
+
+        var answer = MessageBox.Show(
+            $"发现新版本 {version}（当前 {CurrentVersion}）。现在下载并重启完成安装吗？",
+            "ClipStack",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Information);
+
+        if (answer != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        if (!await _updater.DownloadAsync())
+        {
+            MessageBox.Show("下载失败，详情见日志。", "ClipStack", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        QuiesceForUpdate();
+
+        if (!_updater.ApplyAndRestart())
+        {
+            MessageBox.Show("安装没能启动，请手动退出后重开再试。", "ClipStack", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    /// <summary>
+    /// Releases everything holding files the installer has to replace: the SQLite connection keeps
+    /// its WAL files open, and the clipboard listener must stop before the process swaps builds.
+    /// </summary>
+    private void QuiesceForUpdate()
+    {
+        _hotkey?.Dispose();
+        _monitor?.Stop();
+        _queue?.Clear();
+        _store?.Dispose();
+        _tray?.Dispose();
+        Log.Info("Released resources for the update");
     }
 
     private void SetPaused(bool paused)

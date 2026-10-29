@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号，形如 0.2.0（不要带 v）'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $v = '${{ github.event.inputs.version }}'
+          if ([string]::IsNullOrWhiteSpace($v)) { $v = '${{ github.ref_name }}'.TrimStart('v') }
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "版本号必须是 x.y.z，实际是 '$v'" }
+          "value=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Test
+        run: dotnet test ClipStack.sln -c Release --nologo
+
+      - name: Install vpk
+        run: dotnet tool install --global vpk
+
+      - name: Pack
+        shell: pwsh
+        run: ./scripts/pack.ps1 -Version ${{ steps.version.outputs.value }}
+
+      # The tag has to match the package version, otherwise clients never see the update.
+      - name: Upload to GitHub Releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          & "$env:USERPROFILE\.dotnet\tools\vpk.exe" upload github `
+            --repoUrl "https://github.com/${{ github.repository }}" `
+            --token $env:GH_TOKEN `
+            --publish `
+            --releaseName "ClipStack ${{ steps.version.outputs.value }}" `
+            --tag "v${{ steps.version.outputs.value }}" `
+            -o artifacts/releases
