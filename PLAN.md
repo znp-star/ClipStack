@@ -280,7 +280,7 @@ UI 与 Win32 交互不铺自动化测试。
 | M2 ✅ | 面板与搜索 | 快捷键唤出、实时过滤、↑↓/Enter/Esc |
 | M3 ✅ | 置顶、编辑、类型过滤 | 置顶区独立、编辑保存、过滤条可用 |
 | M3.5 ✅ | 托盘、自启与定时清理 | 通知区图标（左键唤出、右键菜单）、开机自启、每小时清理 |
-| M4 ⏳ | 敏感与过期 | 敏感项带角标不落库；过期清理已随 M3.5 完成 |
+| M4 ✅ | 敏感与过期 | 敏感项带「未保存」角标且不落库；过期清理已随 M3.5 完成 |
 | M5 | 设置与热键 | 9 个动作可改、冲突提示、主题三态 |
 | M6 | 打包与自动更新 | Velopack 产物、GitHub Release 可升级 |
 
@@ -306,7 +306,7 @@ UI 与 Win32 交互不铺自动化测试。
 
 ### M3 实现备注
 
-- 过滤条做 全部 / 文本 / 链接 / 图片 / 文件；「敏感」要等 M4 的 `SensitivityFilter` 落地后再加，避免出现永远为空的分类。`Ctrl+Tab` / `Ctrl+Shift+Tab` 循环切换，每次唤出面板都重置为「全部」。
+- 过滤条做 全部 / 文本 / 链接 / 图片 / 文件；「敏感」要等 M4 的 `SensitivityFilter` 落地后再加，避免出现永远为空的分类（已于 M4 补齐）。`Ctrl+Tab` / `Ctrl+Shift+Tab` 循环切换，每次唤出面板都重置为「全部」。
 - 链接不是第四种 `ClipType`：库里仍是 `text`，另加 `is_link` 列（`LinkText.Is`：整条内容匹配 `^(https?://|www\.)\S+$`，夹在正文里的网址不算），这样过滤、排序、分页都走 SQL，回贴行为不变。`is_link` 属于 schema v2，旧库在打开时 `ALTER TABLE` 补列并用 C# 回填分类，`user_version` 从 1 升到 2。
 - 置顶排序沿用 `Query` 里的 `pinned DESC, pinned_at DESC`。行与行之间统一画浅灰细线（`DividerBrush`，左右各内缩 12px）：线是 `ListBoxItem` 模板里行背景的兄弟节点，选中高亮盖不到它；置顶块与时间流的边界因此不再需要单独的分隔线（`DividerVisibility` 已删）。置顶用行尾的裸图钉图标（Segoe Fluent Icons `E718`，无底色）：置顶行常显、强调色，未置顶行悬停才出现、灰色，点击即切换（`PinButton_Click`，点按钮不触发条目粘贴），Ctrl+P 仍作用于选中行。置顶行整体带一层极淡的强调色底（`PinnedRowBrush`）。
 - 行首放缩略图（56×38，垂直居中，圆角 4、1px `EdgeBrush` 描边）。缩略图用 `ImageBrush` 当 `Border` 背景而不是 `Image` 子元素：`ClipToBounds` 只按矩形裁剪，圆角只能靠背景绘制才生效。有缩略图的行不再显示类型角标，图片条目也不显示「图片」这条预览文本。
@@ -328,6 +328,19 @@ UI 与 Win32 交互不铺自动化测试。
 - 清理时机补齐为：启动、每小时（`DispatcherTimer`）、退出前。置顶条目的免疫仍在 `ItemStore.DeleteOlderThan` 里。
 - 从托盘唤出面板时前台是任务栏/桌面，粘不进去：`WindowInfo.IsShellSurface` 命中 `Shell_TrayWnd` / `Progman` / `WorkerW` 等类名时，沿用上一次记录的真实目标窗口。
 - 托盘菜单也提供「暂停监听」（`ClipboardMonitor.IsPaused`）与「清空历史」（`ItemStore.Clear(includePinned: true)`，带确认框）。
+
+### M4 实现备注
+
+- 三层判定集中在 `SensitivityFilter.Evaluate`，顺序即优先级：① 载荷的 `Excluded`（`ExcludeClipboardContentFromMonitorProcessing`，密码管理器与系统自己会用这个格式）② 来源黑名单（进程名 KeePass / 1Password / Bitwarden / LastPass / Dashlane / Enpass / Proton Pass，窗口标题含 InPrivate / Incognito / Private Browsing / 无痕 / 隐私浏览 / 隐身模式）③ 内容正则（PEM 私钥块、`AKIA[0-9A-Z]{16}`、`gh[pousr]_…`、`sk-…`、Luhn 校验通过的 13–19 位卡号）。精度重于召回：误判只是少存几分钟，漏判就是密码落盘。
+- `Excluded` 必须在 `CloseClipboard` 之前读走（`ClipboardReader` 里在 `finally` 关闭前 `WithExcluded`），来源则由 `ClipboardMonitor` 事后 `WithSource` 补上——两者都不在载荷构造时可得。判定只看文本与来源，不做图片像素识别：整张截图走来源/flag 这两层。
+- 分流点只有一处，在 `App.OnClipboardChanged`：先去重折叠（同哈希 800ms），再跑判定——命中就进 `SensitiveQueue` 并直接 return，日志记 `Held sensitive … (reason)`；干净内容才 `ItemStore.AddOrTouch`，日志记 `Captured …`。去重与回环标记两条路共用，避免敏感内容绕开 800ms 折叠。
+- `SensitiveQueue` 是纯内存 `List<ClipItem>`，id 从 -1 往下发，所以「这条在不在库里」等价于 `Item.IsSensitive`：删除走 `_queue.Delete`、粘贴不 bump `use_count`、置顶按钮直接隐藏。凡是拿 `row.Item.Id` 打数据库的地方，都要先过这一层判断。
+- TTL 由启动时的 `SensitiveTtlMinutes`（钳 1–60，默认 10）注入，按 `CreatedAtMs` 判到期，重复粘贴不续命。清理挂在三处：`Add`、`Query`、每小时的 `PurgeExpired`，面板整天不开也会按时释放；上限 50 条 / 100MB，超出丢最旧。同内容重复复制复用原 id，面板选中不会跳。
+- 合并显示在 `RefreshItems`：置顶块在上，库中未置顶项与队列项按 `LastUsedAtMs` 拼成同一条时间流；「敏感」过滤条只取队列（`_sensitiveOnly`），搜索对队列走内存 `Contains`、对库走 SQL。
+- 行的区分靠两处：行尾「未保存」胶囊（`BadgeBackgroundBrush` / `BadgeForegroundBrush`，`ItemRow.SensitiveBadgeVisibility`），以及图钉按钮被 `DataTrigger IsSensitive` 压成 `Collapsed`——这条触发器必须排在样式触发器的最后，否则会被 hover / 已置顶两条重新点亮。`Ctrl+P` 与 `PinButton_Click` 另各留一层拦截并提示：库里没有这一行，`SetPinned` 的 `UPDATE` 会静默影响 0 行，看起来像点了没反应。
+- 回环在这条路上更要紧：敏感项回粘时来源会变成 `ClipStack` 自己，内容正则也未必再命中（比如从密码管理器复制、内容只是一串普通密码）。所以依旧靠写入前的 `ClipStack.IgnoreNext` 标记让监听侧跳过整次更新，而不是靠内容比对。
+- 敏感图片的像素只放在 `ClipItem.ImageBytes`，缩略图由 `ItemRow.FromBytes` 从内存解码，不写 `images\`。托盘「清空历史」一并 `Clear()` 队列，`OnExit` 退出前再清一次。
+- 已知限制：TTL 只在启动时读一次，改设置需重启（设置窗口在 M5）；判定不看图片内容，也不看 `use_count`。
 
 ---
 

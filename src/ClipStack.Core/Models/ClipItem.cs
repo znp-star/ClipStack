@@ -21,6 +21,15 @@ public sealed class ClipItem
     /// <summary>Text items whose whole content is one link; drives the 链接 filter and badge.</summary>
     public bool IsLink { get; init; }
 
+    /// <summary>
+    /// Held in memory only because its content matched the sensitivity rules: it has a negative
+    /// id, never reaches the database, and disappears when the queue expires.
+    /// </summary>
+    public bool IsSensitive { get; init; }
+
+    /// <summary>Pixels for a sensitive image, which must not be written to disk.</summary>
+    public byte[]? ImageBytes { get; init; }
+
     public ClipPayload ToPastePayload() => Type switch
     {
         ClipType.File => ClipPayload.ForFiles((Text ?? string.Empty)
@@ -31,6 +40,11 @@ public sealed class ClipItem
 
     private byte[] ReadImage()
     {
+        if (ImageBytes is { Length: > 0 })
+        {
+            return ImageBytes;
+        }
+
         if (string.IsNullOrEmpty(ImagePath) || !File.Exists(ImagePath))
         {
             return [];

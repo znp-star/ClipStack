@@ -22,6 +22,12 @@ public sealed class ClipPayload
     public string? SourceTitle { get; private init; }
 
     /// <summary>
+    /// The producer asked the clipboard history to skip this content
+    /// (<c>ExcludeClipboardContentFromMonitorProcessing</c>), which password managers use.
+    /// </summary>
+    public bool Excluded { get; private init; }
+
+    /// <summary>
     /// Packed CF_DIB pixels for image payloads. The PNG format alone is invisible to
     /// Chromium-based apps, which build paste files from the DIB; callers that can decode
     /// fill this in before the payload reaches the clipboard writer.
@@ -64,6 +70,23 @@ public sealed class ClipPayload
         ImageDib = ImageDib,
         SourceApp = app,
         SourceTitle = title,
+        Excluded = Excluded,
+    };
+
+    /// <summary>Marks the payload as opted out of clipboard history by its producer.</summary>
+    public ClipPayload WithExcluded(bool excluded) => new()
+    {
+        Type = Type,
+        ContentHash = ContentHash,
+        Text = Text,
+        Html = Html,
+        Rtf = Rtf,
+        FilePaths = FilePaths,
+        ImagePng = ImagePng,
+        ImageDib = ImageDib,
+        SourceApp = SourceApp,
+        SourceTitle = SourceTitle,
+        Excluded = excluded,
     };
 
     /// <summary>Attaches CF_DIB pixels to an image payload; other payload kinds ignore it.</summary>
@@ -79,6 +102,7 @@ public sealed class ClipPayload
         ImageDib = Type == ClipType.Image ? dib : null,
         SourceApp = SourceApp,
         SourceTitle = SourceTitle,
+        Excluded = Excluded,
     };
 
     private static string HashString(ClipType type, string canonical) =>

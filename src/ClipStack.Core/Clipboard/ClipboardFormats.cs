@@ -10,13 +10,18 @@ internal static class ClipboardFormats
     /// </summary>
     public const string IgnoreMarkerName = "ClipStack.IgnoreNext";
 
+    /// <summary>Set by password managers and Windows itself to keep content out of history.</summary>
+    public const string ExcludeFromHistoryName = "ExcludeClipboardContentFromMonitorProcessing";
+
     private static readonly Lazy<uint> IgnoreMarkerId = new(() => NativeMethods.RegisterClipboardFormatW(IgnoreMarkerName));
     private static readonly Lazy<uint> HtmlId = new(() => NativeMethods.RegisterClipboardFormatW("HTML Format"));
     private static readonly Lazy<uint> RtfId = new(() => NativeMethods.RegisterClipboardFormatW("Rich Text Format"));
     private static readonly Lazy<uint> PngId = new(() => NativeMethods.RegisterClipboardFormatW("PNG"));
+    private static readonly Lazy<uint> ExcludeFromHistoryId = new(() => NativeMethods.RegisterClipboardFormatW(ExcludeFromHistoryName));
 
     public static uint IgnoreMarker => IgnoreMarkerId.Value;
     public static uint Html => HtmlId.Value;
     public static uint Rtf => RtfId.Value;
     public static uint Png => PngId.Value;
+    public static uint ExcludeFromHistory => ExcludeFromHistoryId.Value;
 }

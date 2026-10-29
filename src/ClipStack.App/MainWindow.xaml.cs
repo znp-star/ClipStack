@@ -25,18 +25,21 @@ public partial class MainWindow : Window
 
     private readonly ItemStore _store;
     private readonly SettingsStore _settings;
+    private readonly SensitiveQueue _queue;
     private readonly ObservableCollection<ItemRow> _rows = [];
     private IntPtr _target;
     private Monitors.MonitorInfo _monitor;
     private ClipType? _filter;
     private bool _linksOnly;
+    private bool _sensitiveOnly;
     private bool _suppressDeactivate;
     private bool _ready;
 
-    public MainWindow(ItemStore store, SettingsStore settings)
+    public MainWindow(ItemStore store, SettingsStore settings, SensitiveQueue queue)
     {
         _store = store;
         _settings = settings;
+        _queue = queue;
         InitializeComponent();
 
         ItemList.ItemsSource = _rows;
@@ -110,20 +113,33 @@ public partial class MainWindow : Window
         }
 
         var previousId = (ItemList.SelectedItem as ItemRow)?.Item.Id;
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        var items = _store.Query(SearchBox.Text, _filter, MaxRows, _linksOnly);
+        var stored = _store.Query(SearchBox.Text, _filter, MaxRows, _linksOnly);
+        var sensitive = _queue.Query(SearchBox.Text, _filter, _linksOnly, now);
+
+        // Pinned entries stay on top; everything else, sensitive or not, is one time flow.
+        IEnumerable<ClipItem> visible = _sensitiveOnly
+            ? sensitive
+            : stored.Where(item => item.Pinned)
+                .Concat(stored.Where(item => !item.Pinned)
+                    .Concat(sensitive)
+                    .OrderByDescending(item => item.LastUsedAtMs))
+                .Take(MaxRows);
 
         _rows.Clear();
-        foreach (var item in items)
+        foreach (var item in visible)
         {
             _rows.Add(new ItemRow(item));
         }
 
         EmptyHint.Text = !string.IsNullOrWhiteSpace(SearchBox.Text)
             ? "没有匹配的记录"
-            : _filter is not null
-                ? "这个分类还没有记录"
-                : "还没有记录，复制点什么试试";
+            : _sensitiveOnly
+                ? "暂时没有敏感内容"
+                : _filter is not null
+                    ? "这个分类还没有记录"
+                    : "还没有记录，复制点什么试试";
         EmptyHint.Visibility = _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
         if (_rows.Count == 0)
@@ -247,7 +263,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        _store.Touch(row.Item.Id, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        // Sensitive entries never reach the store, so there is no usage counter to bump.
+        if (!row.Item.IsSensitive)
+        {
+            _store.Touch(row.Item.Id, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        }
 
         _suppressDeactivate = true;
         SaveGeometry();
@@ -289,6 +309,12 @@ public partial class MainWindow : Window
     {
         if (ItemList.SelectedItem is not ItemRow row)
         {
+            return;
+        }
+
+        if (row.Item.IsSensitive)
+        {
+            SetStatus("敏感内容只留在内存里，不能置顶");
             return;
         }
 
@@ -336,8 +362,16 @@ public partial class MainWindow : Window
         }
 
         var index = ItemList.SelectedIndex;
-        _store.Delete(row.Item.Id);
-        Log.Info($"Deleted item #{row.Item.Id}");
+        if (row.Item.IsSensitive)
+        {
+            _queue.Delete(row.Item.Id);
+            Log.Info($"Deleted sensitive item #{row.Item.Id}");
+        }
+        else
+        {
+            _store.Delete(row.Item.Id);
+            Log.Info($"Deleted item #{row.Item.Id}");
+        }
 
         RefreshItems();
 
@@ -356,6 +390,12 @@ public partial class MainWindow : Window
     {
         if (ItemList.SelectedItem is not ItemRow row)
         {
+            return;
+        }
+
+        if (row.Item.IsSensitive)
+        {
+            SetStatus("敏感内容只留在内存里，不能编辑");
             return;
         }
 
@@ -401,7 +441,7 @@ public partial class MainWindow : Window
 
     private void CycleFilter(int delta)
     {
-        var chips = new[] { FilterAll, FilterText, FilterLink, FilterImage, FilterFile };
+        var chips = new[] { FilterAll, FilterText, FilterLink, FilterImage, FilterFile, FilterSensitive };
         var current = Array.FindIndex(chips, chip => chip.IsChecked == true);
         var next = ((current < 0 ? 0 : current) + delta + chips.Length) % chips.Length;
         chips[next].IsChecked = true;
@@ -422,6 +462,7 @@ public partial class MainWindow : Window
             _ => null,
         };
         _linksOnly = tag == "link";
+        _sensitiveOnly = tag == "sensitive";
 
         RefreshItems();
     }
@@ -511,8 +552,17 @@ public partial class MainWindow : Window
     {
         if ((sender as FrameworkElement)?.DataContext is ItemRow row)
         {
-            _store.SetPinned(row.Item.Id, !row.Item.Pinned, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-            RefreshItems();
+            // Same rule as the Ctrl+P path: sensitive entries live in memory only, so there is
+            // nothing in the store to pin.
+            if (row.Item.IsSensitive)
+            {
+                SetStatus("敏感内容只留在内存里，不能置顶");
+            }
+            else
+            {
+                _store.SetPinned(row.Item.Id, !row.Item.Pinned, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                RefreshItems();
+            }
         }
 
         e.Handled = true;

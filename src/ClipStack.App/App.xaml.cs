@@ -9,6 +9,7 @@ using ClipStack.Core.Clipboard;
 using ClipStack.Core.Interop;
 using ClipStack.Core.Logging;
 using ClipStack.Core.Models;
+using ClipStack.Core.Security;
 using ClipStack.Core.Settings;
 using ClipStack.Core.Storage;
 
@@ -23,6 +24,7 @@ public partial class App : Application
     private EventWaitHandle? _activateEvent;
     private SettingsStore? _settings;
     private ItemStore? _store;
+    private SensitiveQueue? _queue;
     private ClipboardMonitor? _monitor;
     private GlobalHotkey? _hotkey;
     private MainWindow? _panel;
@@ -63,10 +65,15 @@ public partial class App : Application
         ApplyAccent();
 
         _store = new ItemStore(AppPaths.Database, AppPaths.Images);
+
+        // Sensitive payloads live here only: nothing in this queue ever reaches the database.
+        _queue = new SensitiveQueue(
+            ttl: TimeSpan.FromMinutes(Math.Clamp(_settings.Current.SensitiveTtlMinutes, 1, 60)));
+
         PurgeExpired();
         ApplyAutostart();
 
-        _panel = new MainWindow(_store, _settings);
+        _panel = new MainWindow(_store, _settings, _queue);
         _panel.Closed += (_, _) => Shutdown();
 
         _monitor = new ClipboardMonitor();
@@ -123,8 +130,9 @@ public partial class App : Application
         return brush;
     }
 
-    private void OnClipboardChanged(object? sender, ClipPayload payload)    {
-        if (_store is null)
+    private void OnClipboardChanged(object? sender, ClipPayload payload)
+    {
+        if (_store is null || _queue is null)
         {
             return;
         }
@@ -141,6 +149,25 @@ public partial class App : Application
 
             _lastHash = payload.ContentHash;
             _lastHashAt = now;
+
+            // Sensitive payloads stop here: they are held in memory for a few minutes and are
+            // never written to the database or to disk.
+            var verdict = SensitivityFilter.Evaluate(payload);
+            if (verdict.IsSensitive)
+            {
+                var held = _queue.Add(payload, now);
+                Log.Info(
+                    $"Held sensitive {payload.Type} item #{held.Id} in memory " +
+                    $"({payload.ContentHash[..8]}, {verdict.Reason}: {verdict.Detail}) " +
+                    $"from {payload.SourceApp ?? "unknown"}");
+
+                if (_panel is { IsVisible: true })
+                {
+                    _panel.RefreshItems();
+                }
+
+                return;
+            }
 
             var item = _store.AddOrTouch(payload, now);
             Log.Info(
@@ -335,8 +362,11 @@ public partial class App : Application
         }
 
         var removed = _store.Clear(includePinned: true);
+        var dropped = _queue?.Count ?? 0;
+        _queue?.Clear();
+
         _panel?.RefreshItems();
-        Log.Info($"Cleared {removed} items");
+        Log.Info($"Cleared {removed} items and {dropped} sensitive entries");
     }
 
     /// <summary>Drops entries past the retention window. Pinned items are exempt inside the store.</summary>
@@ -349,17 +379,31 @@ public partial class App : Application
 
         try
         {
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             var cutoff = DateTimeOffset.UtcNow
                 .AddDays(-_settings.Current.RetentionDays)
                 .ToUnixTimeMilliseconds();
 
             var removed = _store.DeleteOlderThan(cutoff);
-            if (removed == 0)
+
+            // The queue purges on every add and query, but the panel may stay closed for days.
+            var dropped = _queue?.Purge(now) ?? 0;
+
+            if (removed == 0 && dropped == 0)
             {
                 return;
             }
 
-            Log.Info($"Purged {removed} expired items");
+            if (removed > 0)
+            {
+                Log.Info($"Purged {removed} expired items");
+            }
+
+            if (dropped > 0)
+            {
+                Log.Info($"Dropped {dropped} expired sensitive items");
+            }
+
             if (_panel is { IsVisible: true })
             {
                 _panel.RefreshItems();
@@ -426,6 +470,9 @@ public partial class App : Application
         _tray?.Dispose();
         _hotkey?.Dispose();
         _monitor?.Dispose();
+
+        // The in-memory queue disappears with the process; drop it before the store closes.
+        _queue?.Clear();
         _store?.Dispose();
         _activateEvent?.Dispose();
 

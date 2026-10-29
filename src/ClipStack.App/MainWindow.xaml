@@ -154,6 +154,12 @@
                              Tag="file"
                              Content="文件"
                              Checked="FilterChip_Checked" />
+                <RadioButton x:Name="FilterSensitive"
+                             Style="{StaticResource FilterChip}"
+                             GroupName="Filter"
+                             Tag="sensitive"
+                             Content="敏感"
+                             Checked="FilterChip_Checked" />
             </StackPanel>
 
             <!-- Items -->
@@ -250,12 +256,12 @@
                                         BorderThickness="1"
                                         RenderOptions.BitmapScalingMode="HighQuality">
                                     <Border.Background>
-                                        <ImageBrush ImageSource="{Binding ThumbnailPath}" Stretch="UniformToFill" />
+                                        <ImageBrush ImageSource="{Binding Thumbnail}" Stretch="UniformToFill" />
                                     </Border.Background>
                                     <Border.Style>
                                         <Style TargetType="Border">
                                             <Style.Triggers>
-                                                <DataTrigger Binding="{Binding ThumbnailPath}" Value="{x:Null}">
+                                                <DataTrigger Binding="{Binding Thumbnail}" Value="{x:Null}">
                                                     <Setter Property="Visibility" Value="Collapsed" />
                                                 </DataTrigger>
                                             </Style.Triggers>
@@ -275,62 +281,84 @@
                                            LineStackingStrategy="BlockLineHeight"
                                            MaxHeight="36" />
 
-                                <!-- Pin control: always visible on pinned rows, appears on hover
-                                     for the rest. Clicking pins/unpins without pasting. -->
-                                <Button x:Name="PinButton"
-                                        Grid.Column="2"
-                                        Width="26" Height="26"
-                                        Margin="6,0,0,0"
-                                        VerticalAlignment="Center"
-                                        Focusable="False"
-                                        Cursor="Hand"
-                                        Click="PinButton_Click"
-                                        ToolTip="置顶 / 取消置顶 (Ctrl+P)"
-                                        AutomationProperties.Name="置顶">
-                                    <Button.Style>
-                                        <Style TargetType="Button">
-                                            <Setter Property="Visibility" Value="Collapsed" />
-                                            <Setter Property="Background" Value="Transparent" />
-                                            <Setter Property="Template">
-                                                <Setter.Value>
-                                                    <ControlTemplate TargetType="Button">
-                                                        <Border x:Name="PinHover"
-                                                                Background="Transparent"
-                                                                CornerRadius="13">
-                                                            <TextBlock x:Name="PinGlyph"
-                                                                       Text="&#xE718;"
-                                                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                                                                       FontSize="12"
-                                                                       HorizontalAlignment="Center"
-                                                                       VerticalAlignment="Center"
-                                                                       Foreground="{DynamicResource TextSecondaryBrush}" />
-                                                        </Border>
-                                                        <ControlTemplate.Triggers>
-                                                            <Trigger Property="IsMouseOver" Value="True">
-                                                                <Setter TargetName="PinHover" Property="Background"
-                                                                        Value="{DynamicResource HoverBrush}" />
-                                                            </Trigger>
-                                                            <DataTrigger Binding="{Binding IsPinned}" Value="True">
-                                                                <Setter TargetName="PinGlyph" Property="Foreground"
-                                                                        Value="{DynamicResource AccentBrush}" />
-                                                            </DataTrigger>
-                                                        </ControlTemplate.Triggers>
-                                                    </ControlTemplate>
-                                                </Setter.Value>
-                                            </Setter>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsPinned}" Value="True">
-                                                    <Setter Property="Visibility" Value="Visible" />
-                                                </DataTrigger>
-                                                <DataTrigger
-                                                    Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
-                                                    Value="True">
-                                                    <Setter Property="Visibility" Value="Visible" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Button.Style>
-                                </Button>
+                                <!-- Trailing chips: the "未保存" badge marks in-memory rows, the pin
+                                     control toggles pinning. Clicking either never pastes. -->
+                                <StackPanel Grid.Column="2"
+                                            Orientation="Horizontal"
+                                            VerticalAlignment="Center"
+                                            Margin="6,0,0,0">
+                                    <Border Padding="5,1"
+                                            VerticalAlignment="Center"
+                                            CornerRadius="3"
+                                            Background="{DynamicResource BadgeBackgroundBrush}"
+                                            Visibility="{Binding SensitiveBadgeVisibility}"
+                                            ToolTip="只留在内存里，应用退出后消失">
+                                        <TextBlock Text="未保存"
+                                                   FontSize="10"
+                                                   Foreground="{DynamicResource BadgeForegroundBrush}" />
+                                    </Border>
+
+                                    <!-- Pin control: always visible on pinned rows, appears on
+                                         hover for the rest. Hidden for sensitive rows, which have
+                                         no record to pin. -->
+                                    <Button x:Name="PinButton"
+                                            Width="26" Height="26"
+                                            Margin="4,0,0,0"
+                                            VerticalAlignment="Center"
+                                            Focusable="False"
+                                            Cursor="Hand"
+                                            Click="PinButton_Click"
+                                            ToolTip="置顶 / 取消置顶 (Ctrl+P)"
+                                            AutomationProperties.Name="置顶">
+                                        <Button.Style>
+                                            <Style TargetType="Button">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Setter Property="Background" Value="Transparent" />
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="Button">
+                                                            <Border x:Name="PinHover"
+                                                                    Background="Transparent"
+                                                                    CornerRadius="13">
+                                                                <TextBlock x:Name="PinGlyph"
+                                                                           Text="&#xE718;"
+                                                                           FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                                           FontSize="12"
+                                                                           HorizontalAlignment="Center"
+                                                                           VerticalAlignment="Center"
+                                                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                                                            </Border>
+                                                            <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsMouseOver" Value="True">
+                                                                    <Setter TargetName="PinHover" Property="Background"
+                                                                            Value="{DynamicResource HoverBrush}" />
+                                                                </Trigger>
+                                                                <DataTrigger Binding="{Binding IsPinned}" Value="True">
+                                                                    <Setter TargetName="PinGlyph" Property="Foreground"
+                                                                            Value="{DynamicResource AccentBrush}" />
+                                                                </DataTrigger>
+                                                            </ControlTemplate.Triggers>
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsPinned}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                    <DataTrigger
+                                                        Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                                        Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                    <!-- Last, so it wins: a sensitive row can never be pinned. -->
+                                                    <DataTrigger Binding="{Binding IsSensitive}" Value="True">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                </StackPanel>
                             </Grid>
                         </DataTemplate>
                     </ListBox.ItemTemplate>

@@ -40,7 +40,15 @@ public static class ClipboardReader
                     return null;
                 }
 
-                return ReadLocked();
+                var payload = ReadLocked();
+                if (payload is null)
+                {
+                    return null;
+                }
+
+                // The flag has to be read while the clipboard is still open.
+                return payload.WithExcluded(
+                    NativeMethods.IsClipboardFormatAvailable(ClipboardFormats.ExcludeFromHistory));
             }
             finally
             {
