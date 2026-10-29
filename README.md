@@ -45,7 +45,7 @@ dotnet run --project src/ClipStack.App
 dotnet test ClipStack.sln
 ```
 
-测试覆盖去重哈希、过期清理、敏感判定、PNG / DIB 编解码、DROPFILES 布局，以及真实剪贴板往返。
+测试覆盖去重哈希、过期清理、PNG / DIB 编解码、DROPFILES 布局，以及真实剪贴板往返。
 
 ## 数据位置
 
