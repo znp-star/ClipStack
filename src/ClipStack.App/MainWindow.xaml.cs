@@ -84,10 +84,18 @@ public partial class MainWindow : Window
         {
             _suppressDeactivate = false;
 
-            var hwnd = new WindowInteropHelper(this).Handle;
-            WindowActivation.ForceForeground(hwnd);
-            Activate();
-            SearchBox.Focus();
+            // Only reclaim focus if the panel is still on screen. The settings dialog can be
+            // opened from the tray, where the panel is hidden — ForceForeground calls
+            // ShowWindow(SW_RESTORE), which would un-hide the native window behind WPF's back and
+            // leave an unpainted rectangle on the desktop (WPF still thinks it is hidden, so it
+            // never lays the content out).
+            if (IsVisible)
+            {
+                var hwnd = new WindowInteropHelper(this).Handle;
+                WindowActivation.ForceForeground(hwnd);
+                Activate();
+                SearchBox.Focus();
+            }
         }
     }
 
@@ -95,10 +103,17 @@ public partial class MainWindow : Window
     {
         string Key(HotkeyAction action) => HotkeyGesture.Format(_hotkeys[action]);
 
-        HintsText.Text =
-            $"↑↓ 选择   {Key(HotkeyAction.Paste)} 粘贴   {Key(HotkeyAction.Pin)} 置顶   " +
-            $"{Key(HotkeyAction.Edit)} 编辑   {Key(HotkeyAction.Delete)} 删除   " +
-            $"{Key(HotkeyAction.CycleFilter)} 换过滤   Esc 关闭";
+        HintsList.ItemsSource = new[]
+        {
+            new HotkeyHint("↑↓", "选择"),
+            new HotkeyHint(Key(HotkeyAction.Paste), "粘贴"),
+            new HotkeyHint(Key(HotkeyAction.PastePlain), "纯文本"),
+            new HotkeyHint(Key(HotkeyAction.Pin), "置顶"),
+            new HotkeyHint(Key(HotkeyAction.Edit), "编辑"),
+            new HotkeyHint(Key(HotkeyAction.Delete), "删除"),
+            new HotkeyHint(Key(HotkeyAction.CycleFilter), "换过滤"),
+            new HotkeyHint("Esc", "关闭"),
+        };
     }
 
     /// <summary>Shows the panel and remembers which window should receive the paste.</summary>
@@ -739,8 +754,6 @@ public partial class MainWindow : Window
         PasteSelected();
         e.Handled = true;
     }
-
-    private void Quit_Click(object sender, RoutedEventArgs e) => Application.Current.Shutdown();
 
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {

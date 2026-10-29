@@ -105,11 +105,13 @@ public partial class App : Application
             _panel.ShowPanel(ResolvePasteTarget());
         }
 
-        // --settings opens the dialog right away. It needs a shown owner window, so it is ignored
-        // together with --silent.
+        // --settings opens the dialog once startup is done. Opening a modal dialog from inside
+        // OnStartup leaves it waiting for a render pass the outer message loop has not begun yet,
+        // so it is queued for the idle point instead. It also needs a shown owner window, which is
+        // why --silent ignores it.
         if (!silent && e.Args.Any(a => string.Equals(a, "--settings", StringComparison.OrdinalIgnoreCase)))
         {
-            OpenSettings();
+            Dispatcher.BeginInvoke(new Action(OpenSettings), DispatcherPriority.ApplicationIdle);
         }
 
         if (!hotkeyRegistered)
