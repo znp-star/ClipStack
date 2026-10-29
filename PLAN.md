@@ -1,6 +1,6 @@
 # ClipStack — Windows 剪贴板管理器
 
-> 状态：M1、M2、M3 已实现（监听 / 入库 / 回贴 / 面板视觉 / 尺寸记忆 / 图片捕获 / 置顶 / 编辑 / 类型过滤），M4 起待开发
+> 状态：M1、M2、M3 已实现（监听 / 入库 / 回贴 / 面板视觉 / 尺寸记忆 / 图片捕获 / 置顶 / 编辑 / 类型过滤），另已完成托盘图标、开机自启与定时清理；M4 其余部分待开发
 > 目标平台：Windows 11（开发机 26200 x64）
 > 许可：MIT
 
@@ -279,7 +279,8 @@ UI 与 Win32 交互不铺自动化测试。
 | M1 ✅ | 监听、入库、粘贴链路 | 复制文本 → 出现在列表 → 选中粘贴回原窗口 |
 | M2 ✅ | 面板与搜索 | 快捷键唤出、实时过滤、↑↓/Enter/Esc |
 | M3 ✅ | 置顶、编辑、类型过滤 | 置顶区独立、编辑保存、过滤条可用 |
-| M4 | 敏感与过期 | 敏感项带角标不落库、过期自动清理 |
+| M3.5 ✅ | 托盘、自启与定时清理 | 通知区图标（左键唤出、右键菜单）、开机自启、每小时清理 |
+| M4 ⏳ | 敏感与过期 | 敏感项带角标不落库；过期清理已随 M3.5 完成 |
 | M5 | 设置与热键 | 9 个动作可改、冲突提示、主题三态 |
 | M6 | 打包与自动更新 | Velopack 产物、GitHub Release 可升级 |
 
@@ -316,6 +317,17 @@ UI 与 Win32 交互不铺自动化测试。
 - 编辑只对文本条目开放（`F2`），图片与文件给出「只有文本条目可以编辑」的提示。保存时重算内容哈希、清掉 `html` / `rtf`，否则回贴会把旧富文本粘出去；新文本与另一条重复时拒绝保存并提示。
 - 编辑窗口是独立 `ToolWindow`，以面板为 Owner。打开前打上 `_suppressDeactivate`，否则面板会被自己的失焦逻辑藏起来；关闭后强制把焦点还给搜索框。
 - 删除（`Delete`）走 `ItemStore.Delete`，顺带删掉图片文件；搜索框有内容时 `Delete` 仍留给文本框编辑，空搜索框才删条目。
+
+### M3.5 实现备注
+
+- 托盘用 `Shell_NotifyIcon` + 隐藏消息窗口（复用剪贴板监听那套 `NativeMessageWindow`）。图标不引入二进制资源：运行时用 `DrawingVisual` 画（强调色圆角方块 + 两道白条），`RenderTargetBitmap` → `CreateIconIndirect` 转成 `HICON`；失败时退回系统默认图标。
+- 点击回调按通道分流：任务栏角落发 `WM_LBUTTONUP` / `WM_RBUTTONUP`，键盘激活发 `NIN_SELECT`，溢出面板还可能是 `WM_CONTEXTMENU`，四种都处理。左键/双击唤出面板，右键弹菜单。
+- 右键菜单是 WPF `ContextMenu`（模板在 `App.xaml`，和面板同一套圆角扁平样式）。弹出前先 `SetForegroundWindow` 隐藏窗口，点别处才会自动关闭；`MenuItem` 的勾选列固定 16px，避免「暂停监听」勾上后菜单宽度跳变。
+- Explorer 重启会抹掉所有托盘图标，监听 `TaskbarCreated` 广播后重新 `NIM_ADD`。
+- 自启写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值为 `"<exe 路径>" --silent`。每次启动按 `settings.autostart` 校正一次，顺带修复程序被移动后的旧路径；失败只记日志，不阻塞启动。
+- 清理时机补齐为：启动、每小时（`DispatcherTimer`）、退出前。置顶条目的免疫仍在 `ItemStore.DeleteOlderThan` 里。
+- 从托盘唤出面板时前台是任务栏/桌面，粘不进去：`WindowInfo.IsShellSurface` 命中 `Shell_TrayWnd` / `Progman` / `WorkerW` 等类名时，沿用上一次记录的真实目标窗口。
+- 托盘菜单也提供「暂停监听」（`ClipboardMonitor.IsPaused`）与「清空历史」（`ItemStore.Clear(includePinned: true)`，带确认框）。
 
 ---
 

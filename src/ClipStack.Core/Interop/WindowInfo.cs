@@ -72,6 +72,31 @@ public static class WindowInfo
     }
 
     /// <summary>
+    /// True for the taskbar, its notification area and the desktop. Those windows are what the
+    /// foreground turns into when the panel is opened from the tray: they cannot receive a paste,
+    /// so the caller should keep the previous real target instead.
+    /// </summary>
+    public static bool IsShellSurface(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero || !NativeMethods.IsWindow(hwnd))
+        {
+            return false;
+        }
+
+        var buffer = new char[256];
+        var copied = NativeMethods.GetClassNameW(hwnd, buffer, buffer.Length);
+        if (copied <= 0)
+        {
+            return false;
+        }
+
+        var className = new string(buffer, 0, copied);
+        return className is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd"
+            or "TrayNotifyWnd" or "NotifyIconOverflowWindow"
+            or "Progman" or "WorkerW";
+    }
+
+    /// <summary>
     /// False when the process cannot be opened at all, which on Windows normally means
     /// it runs at a higher integrity level (UIPI will also block our input).
     /// </summary>

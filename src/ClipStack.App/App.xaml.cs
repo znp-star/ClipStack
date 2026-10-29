@@ -1,5 +1,6 @@
 ﻿using System.Threading;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -25,6 +26,9 @@ public partial class App : Application
     private ClipboardMonitor? _monitor;
     private GlobalHotkey? _hotkey;
     private MainWindow? _panel;
+    private TrayIcon? _tray;
+    private DispatcherTimer? _cleanupTimer;
+    private IntPtr _lastTarget;
     private volatile bool _shuttingDown;
 
     /// <summary>Collapses the burst of clipboard updates a single copy can produce.</summary>
@@ -59,12 +63,8 @@ public partial class App : Application
         ApplyAccent();
 
         _store = new ItemStore(AppPaths.Database, AppPaths.Images);
-        var purged = _store.DeleteOlderThan(
-            DateTimeOffset.UtcNow.AddDays(-_settings.Current.RetentionDays).ToUnixTimeMilliseconds());
-        if (purged > 0)
-        {
-            Log.Info($"Purged {purged} expired items");
-        }
+        PurgeExpired();
+        ApplyAutostart();
 
         _panel = new MainWindow(_store, _settings);
         _panel.Closed += (_, _) => Shutdown();
@@ -80,13 +80,16 @@ public partial class App : Application
             HotkeyModifiers.Control | HotkeyModifiers.Shift,
             (uint)KeyInterop.VirtualKeyFromKey(Key.V));
 
+        CreateTray();
+        StartCleanupTimer();
+
         // --silent keeps the panel hidden on launch (needed for autostart later, and for tests).
         var silent = e.Args.Any(a => string.Equals(a, "--silent", StringComparison.OrdinalIgnoreCase));
 
         if (!silent)
         {
             // Show once on first launch so the panel is discoverable; afterwards the hotkey rules.
-            _panel.ShowPanel(WindowInfo.GetForeground());
+            _panel.ShowPanel(ResolvePasteTarget());
         }
 
         if (!hotkeyRegistered)
@@ -169,7 +172,7 @@ public partial class App : Application
             return;
         }
 
-        _panel.ShowPanel(WindowInfo.GetForeground());
+        _panel.ShowPanel(ResolvePasteTarget());
     }
 
     private void BringPanelUp()
@@ -185,7 +188,24 @@ public partial class App : Application
             return;
         }
 
-        _panel.ShowPanel(WindowInfo.GetForeground());
+        _panel.ShowPanel(ResolvePasteTarget());
+    }
+
+    /// <summary>
+    /// Remembers the window a paste should go to. Opening the panel from the tray leaves the
+    /// taskbar (or desktop) in the foreground, which cannot take a paste, so the last real
+    /// application window is reused instead.
+    /// </summary>
+    private IntPtr ResolvePasteTarget()
+    {
+        var foreground = WindowInfo.GetForeground();
+        if (WindowInfo.IsShellSurface(foreground))
+        {
+            return WindowInfo.Describe(_lastTarget).App is not null ? _lastTarget : foreground;
+        }
+
+        _lastTarget = foreground;
+        return foreground;
     }
 
     private void StartActivationListener()
@@ -232,6 +252,151 @@ public partial class App : Application
         }
     }
 
+    private void CreateTray()
+    {
+        try
+        {
+            _tray = new TrayIcon("ClipStack · 监听中");
+            _tray.SetMenu(BuildTrayMenu());
+            _tray.Activate += BringPanelUp;
+            _tray.Show();
+        }
+        catch (Exception ex)
+        {
+            // The hotkey still works, so a missing icon degrades rather than blocks.
+            Log.Error("Tray icon could not be created", ex);
+        }
+    }
+
+    private ContextMenu BuildTrayMenu()
+    {
+        var open = new MenuItem { Header = "打开面板" };
+        open.Click += (_, _) => BringPanelUp();
+
+        var pause = new MenuItem { Header = "暂停监听", IsCheckable = true };
+        pause.Click += (_, _) => SetPaused(pause.IsChecked);
+
+        var clear = new MenuItem { Header = "清空历史…" };
+        clear.Click += (_, _) => ClearHistory();
+
+        var quit = new MenuItem { Header = "退出" };
+        quit.Click += (_, _) => _panel?.Close();
+
+        var menu = new ContextMenu();
+        menu.Items.Add(open);
+        menu.Items.Add(pause);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(clear);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(quit);
+
+        // The monitor can be paused from elsewhere later (settings), so read the state on open.
+        menu.Opened += (_, _) => pause.IsChecked = _monitor?.IsPaused == true;
+        return menu;
+    }
+
+    private void SetPaused(bool paused)
+    {
+        if (_monitor is null)
+        {
+            return;
+        }
+
+        _monitor.IsPaused = paused;
+        _tray?.SetTooltip(paused ? "ClipStack · 已暂停监听" : "ClipStack · 监听中");
+        Log.Info(paused ? "Clipboard monitoring paused" : "Clipboard monitoring resumed");
+    }
+
+    private void ClearHistory()
+    {
+        if (_store is null)
+        {
+            return;
+        }
+
+        var answer = _panel is null
+            ? MessageBox.Show(
+                "清空全部历史记录？置顶条目也会被删除，图片文件一并清理，无法恢复。",
+                "ClipStack",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No)
+            : MessageBox.Show(
+                _panel,
+                "清空全部历史记录？置顶条目也会被删除，图片文件一并清理，无法恢复。",
+                "ClipStack",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+
+        if (answer != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        var removed = _store.Clear(includePinned: true);
+        _panel?.RefreshItems();
+        Log.Info($"Cleared {removed} items");
+    }
+
+    /// <summary>Drops entries past the retention window. Pinned items are exempt inside the store.</summary>
+    private void PurgeExpired()
+    {
+        if (_store is null || _settings is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var cutoff = DateTimeOffset.UtcNow
+                .AddDays(-_settings.Current.RetentionDays)
+                .ToUnixTimeMilliseconds();
+
+            var removed = _store.DeleteOlderThan(cutoff);
+            if (removed == 0)
+            {
+                return;
+            }
+
+            Log.Info($"Purged {removed} expired items");
+            if (_panel is { IsVisible: true })
+            {
+                _panel.RefreshItems();
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Purge failed", ex);
+        }
+    }
+
+    private void StartCleanupTimer()
+    {
+        _cleanupTimer = new DispatcherTimer { Interval = TimeSpan.FromHours(1) };
+        _cleanupTimer.Tick += (_, _) => PurgeExpired();
+        _cleanupTimer.Start();
+    }
+
+    /// <summary>Keeps the Run key in sync with the setting, which also repairs a moved executable.</summary>
+    private void ApplyAutostart()
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        try
+        {
+            Autostart.Apply(_settings.Current.Autostart);
+            Log.Info($"Autostart {(_settings.Current.Autostart ? "enabled" : "disabled")}");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Autostart could not be applied: {ex.Message}");
+        }
+    }
+
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         Log.Error("Unhandled UI exception", e.Exception);
@@ -252,6 +417,13 @@ public partial class App : Application
     {
         _shuttingDown = true;
 
+        _cleanupTimer?.Stop();
+        _cleanupTimer = null;
+
+        // Last chance to drop expired entries: the panel may stay in the tray for days.
+        PurgeExpired();
+
+        _tray?.Dispose();
         _hotkey?.Dispose();
         _monitor?.Dispose();
         _store?.Dispose();
