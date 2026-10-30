@@ -372,8 +372,8 @@ UI 与 Win32 交互不铺自动化测试。
 ### M6 实现备注
 
 - 入口点改成手写 `Program.Main`（`StartupObject`）。`VelopackApp.Build().Run()` 必须跑在任何窗口和单实例 Mutex 之前：安装 / 卸载钩子是命令行参数，晚一步就会被“另一个实例正在运行”挡下来。WPF 生成的 `Main` 只负责构造 `App`，插不进去。
-- 更新源 `GithubSource` 指向本仓库、`prerelease: false`。`UpdateManager.IsInstalled` 为 false 时（`bin\` 里直接跑的开发版）不检查；手动点「检查更新」会说明这一份不能自更新，而不是静默失败。
-- 检查时机两处：启动 15 秒后静默查一次（只改托盘 tooltip 和菜单项文案），以及托盘菜单「检查更新…」。网络错误只写日志，不弹窗——更新检查失败不该打断用户。
+- 更新源用 `SimpleWebSource` 指向 `https://github.com/znp-star/ClipStack/releases/latest/download`，客户端只拉一个静态 `releases.win.json`，走 release 资产 CDN。不要换回 `GithubSource`：它匿名调 `api.github.com` 取 release 列表，共享出口 IP 或 VPN 每小时配额耗尽后返回 403，应用就会一直检查不到新版本。`UpdateManager.IsInstalled` 为 false 时（`bin\` 里直接跑的开发版）不检查；手动点「检查更新」会说明这一份不能自更新，而不是静默失败。
+- 检查时机两处：启动 15 秒后静默查一次（只改托盘 tooltip 和菜单项文案），以及托盘菜单「检查更新…」。静默检查的网络错误只写日志，不弹窗——更新检查失败不该打断用户；手动检查则要分清「确实是最新」和「没查成功」，后者必须报失败，不能谎称已是最新。
 - 应用更新前先 `QuiesceForUpdate()`：停剪贴板监听、清空敏感队列、释放 SQLite（WAL 文件是开着的）、销毁托盘图标。安装器要替换这些文件，进程不能还握着。
 - 打包走 `scripts/pack.ps1`：`dotnet publish -r win-x64 --self-contained` 后交给 `vpk pack`。不要加 `PublishSingleFile`——Velopack 靠逐个替换程序目录里的文件做增量，单文件会让每次更新都整包重发。`--runtime win-x64` 必须显式给，否则 vpk 按 x86 标记架构。
 - 产物未签名，首次运行会触发 SmartScreen 警告；将来补证书时在 `vpk pack` 上加 `--signParams`。
