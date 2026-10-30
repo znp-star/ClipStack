@@ -78,7 +78,7 @@ dotnet test ClipStack.sln
 
 ## 数据位置
 
-全部数据都在 `%LOCALAPPDATA%\ClipStack\`：
+全部数据都在 `%LOCALAPPDATA%\ClipStack-data\`：
 
 | 路径 | 内容 |
 |---|---|
@@ -88,6 +88,10 @@ dotnet test ClipStack.sln
 | `logs\` | 每日日志，保留 7 天 |
 
 日志只记哈希前缀与内容长度，不记剪贴板正文。
+
+数据目录刻意放在安装目录**旁边**而不是里面：Velopack 的安装目录是 `%LOCALAPPDATA%\ClipStack`（即 `{packId}`），卸载时会整个删除，安装时还会把「非空目录」当成已安装。0.1.1 及更早版本把数据写在那里，0.1.2 起首次启动会自动把旧数据搬到新位置。
+
+不用 `%APPDATA%`（漫游）是有意的：剪贴板历史不应跟随漫游配置同步到其他机器。
 
 ## 已知限制
 

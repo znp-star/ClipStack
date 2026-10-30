@@ -45,9 +45,24 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        // 0.1.2 moved the data out of Velopack's install folder; bring the old files along once.
+        var migration = AppPaths.MigrateLegacyRoot();
+
         AppPaths.EnsureCreated();
         Log.Init(AppPaths.Logs);
         Log.Info($"ClipStack starting ({Environment.OSVersion.Version})");
+
+        if (migration is { } result)
+        {
+            if (result.Succeeded)
+            {
+                Log.Info(result.Message);
+            }
+            else
+            {
+                Log.Warn(result.Message);
+            }
+        }
 
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;

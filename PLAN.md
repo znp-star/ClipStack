@@ -79,7 +79,7 @@ CREATE TABLE items (
   text          TEXT,
   html          TEXT,
   rtf           TEXT,
-  image_path    TEXT,                  -- %LOCALAPPDATA%\ClipStack\images\xx\<hash>.png
+  image_path    TEXT,                  -- %LOCALAPPDATA%\ClipStack-data\images\xx\<hash>.png
   source_app    TEXT,
   source_title  TEXT,
   created_at    INTEGER NOT NULL,      -- Unix ms
@@ -95,7 +95,7 @@ CREATE INDEX        ix_items_recent ON items(last_used_at DESC);
 CREATE INDEX        ix_items_pinned ON items(pinned, pinned_at DESC);
 ```
 
-数据目录：`%LOCALAPPDATA%\ClipStack\`（`clipstack.db`、`images\`、`logs\`）。
+数据目录：`%LOCALAPPDATA%\ClipStack-data\`（`clipstack.db`、`images\`、`logs\`）。刻意放在 Velopack 安装目录 `%LOCALAPPDATA%\ClipStack\` 之外：卸载会删除整个安装目录，安装时也会把非空目录判为「已安装」。0.1.2 起首次启动自动从旧位置迁移。
 
 ### 写入规则
 
@@ -253,7 +253,7 @@ CREATE INDEX        ix_items_pinned ON items(pinned, pinned_at DESC);
 
 ## 10. 日志与诊断
 
-- 滚动日志保留 7 天，写入 `%LOCALAPPDATA%\ClipStack\logs\`。
+- 滚动日志保留 7 天，写入 `%LOCALAPPDATA%\ClipStack-data\logs\`。
 - 全局未处理异常捕获，崩溃后提示日志路径。
 - 不上报任何数据。
 

@@ -9,7 +9,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>ClipStack</AssemblyName>
     <RootNamespace>ClipStack.App</RootNamespace>
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <ApplicationIcon>Assets\ClipStack.ico</ApplicationIcon>
     <Product>ClipStack</Product>
     <StartupObject>ClipStack.App.Program</StartupObject>
