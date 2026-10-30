@@ -325,22 +325,22 @@ public partial class MainWindow : Window
 
     private void SaveGeometry()
     {
-        var monitor = _monitor.Device.Length > 0
-            ? _monitor
-            : Monitors.ForWindow(new WindowInteropHelper(this).Handle);
-        if (monitor.Device.Length == 0)
+        // Started with --silent and quit from the tray: the panel never opened, so there is
+        // no monitor and no real bounds to remember. _monitor is a struct, so an unshown
+        // panel leaves it at default with a null Device.
+        if (string.IsNullOrEmpty(_monitor.Device))
         {
             return;
         }
 
-        var scale = monitor.Scale;
-        _settings.Current.PanelGeometry[monitor.Device] = new PanelGeometry
+        var scale = _monitor.Scale;
+        _settings.Current.PanelGeometry[_monitor.Device] = new PanelGeometry
         {
             X = Math.Round(Left * scale),
             Y = Math.Round(Top * scale),
             Width = Math.Round(Width * scale),
             Height = Math.Round(Height * scale),
-            Dpi = monitor.Dpi,
+            Dpi = _monitor.Dpi,
         };
 
         _settings.Save();
@@ -1049,7 +1049,17 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        SaveGeometry();
+        // Nothing about quitting may hinge on geometry: base.OnClosed raises Closed, and that
+        // is what shuts the application down.
+        try
+        {
+            SaveGeometry();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Saving panel geometry failed", ex);
+        }
+
         base.OnClosed(e);
     }
 
