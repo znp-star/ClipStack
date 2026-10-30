@@ -33,6 +33,9 @@ public partial class App : Application
     private IntPtr _lastTarget;
     private volatile bool _shuttingDown;
 
+    // One update flow at a time: a second one would only fight the first over Velopack's lock.
+    private bool _updating;
+
     /// <summary>Effective bindings for the nine actions, resolved from settings at startup.</summary>
     private Dictionary<HotkeyAction, HotkeyGesture> _hotkeys = [];
 
@@ -493,6 +496,20 @@ public partial class App : Application
             return;
         }
 
+        if (_updating)
+        {
+            if (manual)
+            {
+                MessageBox.Show(
+                    "更新已经在进行中，进度在更新窗口里。",
+                    "ClipStack",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+
+            return;
+        }
+
         var check = await _updater.CheckAsync();
 
         switch (check.State)
@@ -562,15 +579,20 @@ public partial class App : Application
             return;
         }
 
-        var download = await _updater.DownloadAsync();
-        if (!download.Ok)
+        var download = await DownloadWithProgressAsync(version);
+        switch (download.State)
         {
-            MessageBox.Show(
-                $"下载失败：{download.Error}\n\n可以重试一次，或直接到 GitHub Releases 下载安装包覆盖安装，数据不受影响。",
-                "ClipStack",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-            return;
+            case UpdateDownloadState.Cancelled:
+                _tray?.SetTooltip($"ClipStack · 可更新到 {version}");
+                return;
+
+            case UpdateDownloadState.Failed:
+                MessageBox.Show(
+                    $"下载失败：{download.Error}\n\n可以重试一次，或直接到 GitHub Releases 下载安装包覆盖安装，数据不受影响。",
+                    "ClipStack",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
         }
 
         QuiesceForUpdate();
@@ -578,6 +600,39 @@ public partial class App : Application
         if (!_updater.ApplyAndRestart())
         {
             MessageBox.Show("安装没能启动，请手动退出后重开再试。", "ClipStack", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    /// <summary>
+    /// Downloads with the progress window on screen. The flow is marked busy for its whole length,
+    /// so a second click cannot start a competing download that Velopack would refuse anyway.
+    /// </summary>
+    private async Task<UpdateDownload> DownloadWithProgressAsync(string version)
+    {
+        _updating = true;
+        if (_updateItem is not null)
+        {
+            _updateItem.IsEnabled = false;
+            _updateItem.Header = $"正在下载 v{version}…";
+        }
+
+        var window = new UpdateProgressWindow(version, _updater!.PendingBytes);
+        window.Show();
+
+        try
+        {
+            return await _updater.DownloadAsync(window.Report, window.Token);
+        }
+        finally
+        {
+            window.Close();
+            _updating = false;
+
+            if (_updateItem is not null)
+            {
+                _updateItem.IsEnabled = true;
+                _updateItem.Header = $"安装更新 v{version}…";
+            }
         }
     }
 

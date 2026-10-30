@@ -56,6 +56,9 @@ internal sealed class Updater
     /// <summary>Version of the release found by the last successful check, if any.</summary>
     public string? PendingVersion => _pending?.TargetFullRelease.Version.ToString();
 
+    /// <summary>Download size of that release, so the progress window can show megabytes.</summary>
+    public long PendingBytes => _pending?.TargetFullRelease.Size ?? 0;
+
     /// <summary>
     /// Asks the feed for a newer release and remembers it. The three outcomes are kept apart on
     /// purpose: telling the user "you are up to date" when the request failed hides the reason
@@ -82,37 +85,127 @@ internal sealed class Updater
     }
 
     /// <summary>
-    /// Downloads whatever the last <see cref="CheckAsync"/> found. Velopack serialises update work
-    /// with <c>.velopack_lock</c> in the packages directory, so a second operation — another click,
-    /// the previous attempt winding down, the installer still finishing — makes the call fail before
-    /// a single byte is fetched. That lock is short lived, so wait for it instead of reporting a
-    /// download failure the user cannot do anything about.
+    /// Downloads whatever the last <see cref="CheckAsync"/> found. <paramref name="progress"/> gets
+    /// the percentage from Velopack, on a background thread; <paramref name="cancelToken"/> stops it.
     /// </summary>
-    public async Task<UpdateDownload> DownloadAsync()
+    /// <remarks>
+    /// Two things go wrong on a slow or proxied connection, and both used to surface as "download
+    /// failed": Velopack serialises update work with <c>.velopack_lock</c>, so a second operation
+    /// makes the call fail before a byte is fetched; and a stalled transfer hangs forever without a
+    /// read timeout, holding that lock. The first is retried after a short wait. The second is cut
+    /// loose by a watchdog and started again from the beginning — Velopack does not send a Range
+    /// header, so the <c>.partial</c> file cannot be resumed, only discarded.
+    /// </remarks>
+    public async Task<UpdateDownload> DownloadAsync(Action<int>? progress = null, CancellationToken cancelToken = default)
     {
         if (_manager is null || _pending is null)
         {
             return UpdateDownload.Failed("没有待下载的更新");
         }
 
-        for (var attempt = 0; ; attempt++)
+        var lockAttempt = 0;
+        var stalls = 0;
+
+        while (true)
         {
+            using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancelToken);
+            var lastActivity = Environment.TickCount64;
+
+            void Report(int percent)
+            {
+                lastActivity = Environment.TickCount64;
+                progress?.Invoke(percent);
+            }
+
+            // A transfer that stops moving never fails on its own; cancel it so it can be started
+            // again on a fresh connection.
+            using var watchdog = new Timer(
+                _ =>
+                {
+                    if (Environment.TickCount64 - lastActivity < StallMs)
+                    {
+                        return;
+                    }
+
+                    try
+                    {
+                        attempt.Cancel();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // The attempt finished while the timer was firing.
+                    }
+                },
+                state: null,
+                dueTime: WatchdogInterval,
+                period: WatchdogInterval);
+
             try
             {
-                await _manager.DownloadUpdatesAsync(_pending);
-                return UpdateDownload.Success;
+                await _manager.DownloadUpdatesAsync(_pending, Report, attempt.Token);
+                return UpdateDownload.Done;
             }
-            catch (AcquireLockFailedException) when (attempt < LockRetries.Length)
+            catch (OperationCanceledException) when (!cancelToken.IsCancellationRequested)
             {
-                var delay = LockRetries[attempt];
+                stalls++;
+                Log.Warn($"Update download made no progress for {StallMs / 1000}s (attempt {stalls})");
+                if (stalls > StallRetries)
+                {
+                    return UpdateDownload.Failed(
+                        $"下载连续 {StallRetries + 1} 次卡住不动，可能和网络或代理有关。稍后再试，或到 GitHub Releases 手动下载安装包。");
+                }
+
+                if (!await WaitAsync(TimeSpan.FromSeconds(2), cancelToken))
+                {
+                    Log.Info("Update download cancelled");
+                    return UpdateDownload.Cancelled;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Log.Info("Update download cancelled");
+                return UpdateDownload.Cancelled;
+            }
+            catch (AcquireLockFailedException) when (lockAttempt < LockRetries.Length)
+            {
+                var delay = LockRetries[lockAttempt++];
                 Log.Info($"Update download waiting for the update lock ({delay.TotalSeconds:0}s)");
-                await Task.Delay(delay);
+
+                // Waiting inside a catch block: a cancellation here is not caught by the clauses
+                // below, so it has to be turned into an outcome right here.
+                if (!await WaitAsync(delay, cancelToken))
+                {
+                    Log.Info("Update download cancelled");
+                    return UpdateDownload.Cancelled;
+                }
             }
             catch (Exception ex)
             {
                 Log.Warn($"Update download failed: {ex.Message}");
                 return UpdateDownload.Failed(ex.Message);
             }
+        }
+    }
+
+    /// <summary>No progress for this long means the connection is dead, not slow.</summary>
+    private const int StallMs = 90_000;
+
+    private static readonly TimeSpan WatchdogInterval = TimeSpan.FromSeconds(5);
+
+    /// <summary>How many times a stalled transfer is restarted before giving up.</summary>
+    private const int StallRetries = 3;
+
+    /// <summary>Waits, returning false when the user cancels while we wait.</summary>
+    private static async Task<bool> WaitAsync(TimeSpan delay, CancellationToken cancelToken)
+    {
+        try
+        {
+            await Task.Delay(delay, cancelToken);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
         }
     }
 
@@ -141,11 +234,25 @@ internal sealed class Updater
 }
 
 /// <summary>The outcome of <see cref="Updater.DownloadAsync"/>; the reason is kept for the dialog.</summary>
-internal sealed record UpdateDownload(bool Ok, string? Error)
+internal enum UpdateDownloadState
 {
-    public static readonly UpdateDownload Success = new(true, null);
+    /// <summary>The package is on disk and ready to install.</summary>
+    Done,
 
-    public static UpdateDownload Failed(string error) => new(false, error);
+    /// <summary>The user cancelled; nothing to report.</summary>
+    Cancelled,
+
+    /// <summary>Nothing was downloaded; <see cref="UpdateDownload.Error"/> says why.</summary>
+    Failed,
+}
+
+internal sealed record UpdateDownload(UpdateDownloadState State, string? Error = null)
+{
+    public static readonly UpdateDownload Done = new(UpdateDownloadState.Done);
+
+    public static readonly UpdateDownload Cancelled = new(UpdateDownloadState.Cancelled);
+
+    public static UpdateDownload Failed(string error) => new(UpdateDownloadState.Failed, error);
 }
 
 /// <summary>What one look at the release feed produced.</summary>
