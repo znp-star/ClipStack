@@ -562,9 +562,14 @@ public partial class App : Application
             return;
         }
 
-        if (!await _updater.DownloadAsync())
+        var download = await _updater.DownloadAsync();
+        if (!download.Ok)
         {
-            MessageBox.Show("下载失败，详情见日志。", "ClipStack", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(
+                $"下载失败：{download.Error}\n\n可以重试一次，或直接到 GitHub Releases 下载安装包覆盖安装，数据不受影响。",
+                "ClipStack",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
             return;
         }
 
