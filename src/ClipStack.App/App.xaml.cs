@@ -493,35 +493,50 @@ public partial class App : Application
             return;
         }
 
-        if (!_updater.IsInstalled)
-        {
-            if (manual)
-            {
-                MessageBox.Show(
-                    "这一份不是通过安装包装的，没法自更新。\n先装一次 GitHub Releases 里的安装包，之后的版本就能自动升级。",
-                    "ClipStack",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
-            }
+        var check = await _updater.CheckAsync();
 
-            return;
+        switch (check.State)
+        {
+            case UpdateCheckState.NotInstalled:
+                if (manual)
+                {
+                    MessageBox.Show(
+                        "这一份不是通过安装包装的，没法自更新。\n先装一次 GitHub Releases 里的安装包，之后的版本就能自动升级。",
+                        "ClipStack",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
+
+                return;
+
+            case UpdateCheckState.Failed:
+                // Saying "up to date" here would be a guess dressed up as an answer.
+                if (manual)
+                {
+                    MessageBox.Show(
+                        $"检查更新失败：{check.Error}\n\n可以稍后再试，或直接到 GitHub Releases 下载安装包覆盖安装，数据不受影响。",
+                        "ClipStack",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
+
+                return;
+
+            case UpdateCheckState.UpToDate:
+                Log.Info($"Update check: up to date ({CurrentVersion})");
+                if (manual)
+                {
+                    MessageBox.Show(
+                        $"已经是最新版本（{CurrentVersion}）。",
+                        "ClipStack",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
+
+                return;
         }
 
-        var version = await _updater.CheckAsync();
-
-        if (version is null)
-        {
-            if (manual)
-            {
-                MessageBox.Show(
-                    $"已经是最新版本（{CurrentVersion}）。",
-                    "ClipStack",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
-            }
-
-            return;
-        }
+        var version = check.Version!;
 
         if (_updateItem is not null)
         {

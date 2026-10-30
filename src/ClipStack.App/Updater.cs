@@ -10,7 +10,14 @@ namespace ClipStack.App;
 /// </summary>
 internal sealed class Updater
 {
-    private const string RepositoryUrl = "https://github.com/znp-star/ClipStack";
+    /// <summary>
+    /// The release feed sits next to the packages, so reading it is one plain download of
+    /// <c>releases.win.json</c>. Asking <see cref="GithubSource"/> instead goes through the GitHub
+    /// REST API, which answers anonymous callers with 403 once the hourly per-IP quota is used up —
+    /// on a shared or VPN address that happens constantly, and the app then looks up to date when
+    /// it is not.
+    /// </summary>
+    private const string FeedUrl = "https://github.com/znp-star/ClipStack/releases/latest/download";
 
     private readonly UpdateManager? _manager;
     private UpdateInfo? _pending;
@@ -19,7 +26,7 @@ internal sealed class Updater
     {
         try
         {
-            _manager = new UpdateManager(new GithubSource(RepositoryUrl, null, prerelease: false));
+            _manager = new UpdateManager(new SimpleWebSource(FeedUrl));
         }
         catch (Exception ex)
         {
@@ -35,26 +42,28 @@ internal sealed class Updater
     public string? PendingVersion => _pending?.TargetFullRelease.Version.ToString();
 
     /// <summary>
-    /// Asks the feed for a newer release and remembers it. Returns the version, or null when the
-    /// app is up to date, not installed, or the check failed.
+    /// Asks the feed for a newer release and remembers it. The three outcomes are kept apart on
+    /// purpose: telling the user "you are up to date" when the request failed hides the reason
+    /// they are stuck on an old build.
     /// </summary>
-    public async Task<string?> CheckAsync()
+    public async Task<UpdateCheck> CheckAsync()
     {
         if (_manager is not { IsInstalled: true })
         {
-            return null;
+            return UpdateCheck.NotInstalled;
         }
 
         try
         {
             _pending = await _manager.CheckForUpdatesAsync();
-            return PendingVersion;
         }
         catch (Exception ex)
         {
             Log.Warn($"Update check failed: {ex.Message}");
-            return null;
+            return UpdateCheck.Failed(ex.Message);
         }
+
+        return _pending is null ? UpdateCheck.UpToDate : UpdateCheck.Available(PendingVersion!);
     }
 
     /// <summary>Downloads whatever the last <see cref="CheckAsync"/> found.</summary>
@@ -99,4 +108,32 @@ internal sealed class Updater
             return false;
         }
     }
+}
+
+/// <summary>What one look at the release feed produced.</summary>
+internal enum UpdateCheckState
+{
+    /// <summary>A newer release is waiting for download.</summary>
+    Available,
+
+    /// <summary>The feed answered, and it holds nothing newer than this build.</summary>
+    UpToDate,
+
+    /// <summary>The feed could not be read; the build may well be old, but nobody knows.</summary>
+    Failed,
+
+    /// <summary>This copy did not come from the installer, so it cannot replace itself.</summary>
+    NotInstalled,
+}
+
+/// <summary>The outcome of <see cref="Updater.CheckAsync"/>, with the version when there is one.</summary>
+internal sealed record UpdateCheck(UpdateCheckState State, string? Version, string? Error)
+{
+    public static UpdateCheck Available(string version) => new(UpdateCheckState.Available, version, null);
+
+    public static readonly UpdateCheck UpToDate = new(UpdateCheckState.UpToDate, null, null);
+
+    public static readonly UpdateCheck NotInstalled = new(UpdateCheckState.NotInstalled, null, null);
+
+    public static UpdateCheck Failed(string error) => new(UpdateCheckState.Failed, null, error);
 }
