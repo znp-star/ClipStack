@@ -68,6 +68,8 @@ dotnet tool install --global vpk
 
 发布：推一个 `v0.1.0` 形式的标签，GitHub Actions 会跑测试、打包并创建 Release；也可以在 Actions 页面手动触发并填版本号。客户端只在“由安装包装出来的”副本上检查更新，`bin\` 里直接跑的开发版会提示无法自更新。
 
+客户端检查更新时只下载一个静态文件 `releases.win.json`（地址是 `releases/latest/download/`，走 release 资产 CDN，不经过 GitHub REST API），所以共享出口 IP 或 VPN 常见的 API 限流不会影响更新。检查失败会明确提示失败原因，不会谎称“已是最新版本”。
+
 ## 测试
 
 ```powershell
