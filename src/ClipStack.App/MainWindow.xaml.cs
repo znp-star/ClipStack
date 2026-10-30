@@ -175,9 +175,15 @@ public partial class MainWindow : Window
         SearchBox.Focus();
         Keyboard.Focus(SearchBox);
 
-        if (ItemList.SelectedIndex < 0 && _rows.Count > 0)
+        // Every invocation starts at the newest entry, not whatever was selected last time.
+        if (_rows.Count > 0)
         {
             ItemList.SelectedIndex = 0;
+            ItemList.ScrollIntoView(ItemList.SelectedItem);
+        }
+        else
+        {
+            ItemList.SelectedIndex = -1;
         }
 
         AnimateIn();
