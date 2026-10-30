@@ -13,7 +13,9 @@
         FontFamily="Microsoft YaHei UI, Segoe UI"
         FontSize="13"
         UseLayoutRounding="True"
-        SnapsToDevicePixels="True">
+        SnapsToDevicePixels="True"
+        PreviewKeyDown="Window_PreviewKeyDown"
+        Deactivated="Window_Deactivated">
 
     <Window.Resources>
         <Style x:Key="SectionHeader" TargetType="TextBlock">
@@ -116,7 +118,6 @@
                         Content="{Binding GestureText}"
                         Tag="{Binding}"
                         Click="HotkeyBox_Click"
-                        PreviewKeyDown="HotkeyBox_PreviewKeyDown"
                         AutomationProperties.Name="{Binding Label}" />
             </Grid>
         </DataTemplate>
@@ -201,7 +202,7 @@
                            Margin="0,3,0,0" />
 
                 <TextBlock Text="快捷键" Style="{StaticResource SectionHeader}" />
-                <TextBlock Text="点一下键位框再按键即可改绑；Esc 取消，Backspace 清空。全局动作至少要带一个修饰键。"
+                <TextBlock Text="点一下键位框再按键即可改绑；Esc 取消，Backspace 清空。全局动作至少要带一个修饰键。Win 组合键被系统占用（Win+V 永远是系统剪贴板），录不到。"
                            Style="{StaticResource Hint}"
                            Margin="0,0,0,6" />
 

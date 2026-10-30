@@ -153,18 +153,32 @@ public partial class SettingsWindow : Window
         button.Focus();
     }
 
-    private void HotkeyBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (sender is not Button { Tag: HotkeyRow row })
+        // The dialog captures the keystroke, not just the focused key cap: the cap went deaf the
+        // moment focus moved elsewhere (a system flyout such as Win+V takes it), which left the
+        // box sitting on "请按键" while nothing could reach it.
+        var row = _rows.FirstOrDefault(r => r.IsRecording);
+        if (row is null)
         {
             return;
         }
 
         e.Handled = true;
 
-        if (HotkeyInput.KeyOf(e) == Key.Escape)
+        var key = HotkeyInput.KeyOf(e);
+
+        if (key == Key.Escape)
         {
             row.IsRecording = false;
+            return;
+        }
+
+        // Windows keeps the Win+key combinations for itself and never delivers them here, so
+        // saying so beats waiting for a keystroke that cannot arrive.
+        if (key is Key.LWin or Key.RWin)
+        {
+            row.Error = "Win 组合键被系统占用，请改用 Ctrl / Alt / Shift";
             return;
         }
 
@@ -188,6 +202,15 @@ public partial class SettingsWindow : Window
         row.Gesture = gesture;
         row.Error = null;
         row.IsRecording = false;
+    }
+
+    /// <summary>A key cap that lost the window must not stay on "请按键" forever.</summary>
+    private void Window_Deactivated(object? sender, EventArgs e)
+    {
+        foreach (var row in _rows)
+        {
+            row.IsRecording = false;
+        }
     }
 
     private static bool TryReadNumber(TextBox box, int min, int max, TextBlock error, out int value)
