@@ -6,6 +6,22 @@ public static class WindowInfo
 {
     public static IntPtr GetForeground() => NativeMethods.GetForegroundWindow();
 
+    /// <summary>Brings a window to the foreground; false when Windows refuses the request.</summary>
+    public static bool Activate(IntPtr hwnd) => hwnd != IntPtr.Zero && NativeMethods.SetForegroundWindow(hwnd);
+
+    /// <summary>Process id that owns a window, or 0 when the handle is gone.</summary>
+    public static uint GetProcessId(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero || !NativeMethods.IsWindow(hwnd))
+        {
+            return 0;
+        }
+
+        NativeMethods.GetWindowThreadProcessId(hwnd, out var processId);
+        return processId;
+    }
+
+
     /// <summary>Process name (without extension) and window title of a window handle.</summary>
     public static (string? App, string? Title) Describe(IntPtr hwnd)
     {

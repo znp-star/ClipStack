@@ -42,7 +42,7 @@ public static class PasteInvoker
         "mstsc",
     };
 
-    public static PasteResult Paste(ClipPayload payload, IntPtr target)
+    public static PasteResult Paste(ClipPayload payload, IntPtr target, Action? onActivated = null)
     {
         if (!ClipboardWriter.TryWrite(payload))
         {
@@ -77,7 +77,12 @@ public static class PasteInvoker
         }
 
         var shiftInsert = app is not null && TerminalProcesses.Contains(app);
-        Thread.Sleep(20);
+
+        // The window is foreground now, but the control that had the caret may not be: Qt apps hand
+        // the focus to their first focusable widget when activated again. Give it back, then let it
+        // settle before typing, otherwise the keystroke lands somewhere that ignores paste.
+        onActivated?.Invoke();
+        Thread.Sleep(60);
         SendPasteKeystroke(shiftInsert);
         Log.Info($"Pasted item into {app ?? "unknown"} ({(shiftInsert ? "Shift+Insert" : "Ctrl+V")})");
         return new PasteResult(PasteOutcome.Sent, null);

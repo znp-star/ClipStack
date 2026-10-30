@@ -35,6 +35,10 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _tipDelay = new() { Interval = TimeSpan.FromMilliseconds(280) };
     private Dictionary<HotkeyAction, HotkeyGesture> _hotkeys = Hotkeys.Resolve(null);
     private IntPtr _target;
+
+    // Which control inside the target had the caret when the panel opened; null when the app does
+    // not expose UI Automation and the callers fall back to plain window activation.
+    private FocusRestore? _targetFocus;
     private Monitors.MonitorInfo _monitor;
     private ClipType? _filter;
     private bool _linksOnly;
@@ -142,8 +146,15 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Shows the panel and remembers which window should receive the paste.</summary>
-    public void ShowPanel(IntPtr target)
+    public void ShowPanel(IntPtr target, bool captureFocus = true)
     {
+        // Snapshot the caret before the panel takes the foreground. A re-show after a failed paste
+        // keeps the snapshot it was opened with: by then the focus is already our own window.
+        if (captureFocus || _target != target)
+        {
+            _targetFocus = FocusRestore.Capture(target);
+        }
+
         _target = target;
         StatusText.Visibility = Visibility.Collapsed;
 
@@ -189,11 +200,20 @@ public partial class MainWindow : Window
         AnimateIn();
     }
 
-    public void HidePanel()
+    /// <summary>
+    /// Hides the panel. <paramref name="returnFocus"/> hands the foreground and the caret back to
+    /// the window the panel was opened over, which is what dismissing it with Esc should do.
+    /// </summary>
+    public void HidePanel(bool returnFocus = false)
     {
         HideRowTip();
         SaveGeometry();
         Hide();
+
+        if (returnFocus && _target != IntPtr.Zero)
+        {
+            _targetFocus?.Restore(_target);
+        }
     }
 
     public void SetStatus(string message)
@@ -394,13 +414,13 @@ public partial class MainWindow : Window
             payload = payload.WithDib(DibConverter.FromPng(png));
         }
 
-        var result = PasteInvoker.Paste(payload, _target);
+        var result = PasteInvoker.Paste(payload, _target, _targetFocus is null ? null : () => _targetFocus.Restore(_target));
 
         if (result.Outcome != PasteOutcome.Sent)
         {
             Log.Warn($"Paste not delivered: {result.Reason}");
             // Nothing was typed into the target, so bring the panel back with the reason.
-            ShowPanel(_target);
+            ShowPanel(_target, captureFocus: false);
             SetStatus(result.Reason ?? "内容已复制到剪贴板");
         }
 
@@ -586,7 +606,7 @@ public partial class MainWindow : Window
                 }
                 else
                 {
-                    HidePanel();
+                    HidePanel(returnFocus: true);
                 }
 
                 e.Handled = true;
