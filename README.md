@@ -58,6 +58,8 @@ dotnet tool install --global vpk
 ./scripts/pack.ps1 -Version 0.1.0
 ```
 
+打包要求 `CHANGELOG.md` 里有该版本的 `## 0.1.0` 段落，缺失或为空会直接报错；这段内容会作为 Release 的更新说明，所以发版时不会只有一个版本号。
+
 产物在 `artifacts/releases`：
 
 | 文件 | 用途 |

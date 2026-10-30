@@ -11,12 +11,18 @@
     SemVer version, e.g. 0.2.0. Must be higher than the published one, otherwise the app will
     never see an update.
 
+.PARAMETER ReleaseNotes
+    Markdown file used as the release notes. Defaults to the matching section of CHANGELOG.md,
+    which must exist, so a release never ships with just a version number.
+
 .EXAMPLE
     ./scripts/pack.ps1 -Version 0.2.0
 #>
 param(
     [Parameter(Mandatory = $true)]
-    [string]$Version
+    [string]$Version,
+
+    [string]$ReleaseNotes
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,6 +45,36 @@ if (-not (Test-Path $vpk)) {
     throw 'vpk not found. Install it once with: dotnet tool install --global vpk'
 }
 
+# vpk embeds the notes into the package, so the GitHub release body is the changelog section
+# rather than a bare version number.
+if (-not $ReleaseNotes) {
+    $changelog = Join-Path $root 'CHANGELOG.md'
+    if (-not (Test-Path $changelog)) {
+        throw "CHANGELOG.md not found: $changelog"
+    }
+
+    $escaped = [regex]::Escape($Version)
+    $section = [regex]::Match(
+        (Get-Content $changelog -Raw),
+        "(?ms)^##[ \t]*\[?v?$escaped\]?[^\r\n]*\r?\n(.*?)(?=^##[ \t]|\z)"
+    )
+    if (-not $section.Success) {
+        throw "CHANGELOG.md has no section for $Version. Add one before packing."
+    }
+
+    $body = $section.Groups[1].Value.Trim()
+    if ([string]::IsNullOrWhiteSpace($body)) {
+        throw "CHANGELOG.md section for $Version is empty. Write what changed in this release."
+    }
+
+    $ReleaseNotes = Join-Path $root "artifacts\release-notes-$Version.md"
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ReleaseNotes) | Out-Null
+    [System.IO.File]::WriteAllText($ReleaseNotes, $body, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+Write-Host "Release notes ($ReleaseNotes):"
+Get-Content $ReleaseNotes | ForEach-Object { "  $_" }
+
 Write-Host "Publishing $Version (win-x64, self-contained)..."
 dotnet publish $project -c Release -r win-x64 --self-contained true `
     -p:Version=$Version -o $publish --nologo
@@ -56,6 +92,7 @@ Write-Host 'Packing with Velopack...'
     --packTitle ClipStack `
     --packAuthors znp-star `
     --icon $icon `
+    --releaseNotes $ReleaseNotes `
     -o $output
 if ($LASTEXITCODE -ne 0) {
     throw "vpk pack failed. 若提示版本已存在，说明 $output 里已有 >= $Version 的发布：" +
