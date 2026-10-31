@@ -23,8 +23,13 @@ public sealed class ItemRow
     /// </summary>
     private const int PreviewLongSide = 800;
 
-    private ImageSource? _preview;
-    private bool _previewResolved;
+    /// <summary>
+    /// How many hover previews stay decoded. One is enough for a single tip, a handful keeps a
+    /// sweep up and down the list instant; the point is the ceiling, each entry is about 2MB.
+    /// </summary>
+    private const int PreviewCacheSize = 8;
+
+    private static readonly PreviewCache Previews = new(PreviewCacheSize);
 
     public ItemRow(ClipItem item)
     {
@@ -65,40 +70,35 @@ public sealed class ItemRow
     public ImageSource? Thumbnail { get; }
 
     /// <summary>
-    /// Larger decode of the same pixels, used by the hover tip. Resolved on first use and kept for
-    /// the row's lifetime: the row lives exactly as long as the item, so nothing outlives the list
-    /// while a second hover on the same row costs nothing.
+    /// Larger decode of the same pixels, used by the hover tip. Decoded on first hover and kept in
+    /// a small LRU rather than on the row: rows are rebuilt on every open, and keeping one per row
+    /// would hold every preview the pointer ever crossed.
     /// </summary>
-    public ImageSource? PreviewImage
+    public ImageSource? PreviewImage => Previews.Get(CacheKey, DecodePreview);
+
+    /// <summary>Drops every decoded preview; the panel calls this when it hides.</summary>
+    public static void ClearPreviewCache() => Previews.Clear();
+
+    private string CacheKey =>
+        string.IsNullOrEmpty(Item.ContentHash) ? $"#{Item.Id}" : Item.ContentHash;
+
+    private ImageSource? DecodePreview()
     {
-        get
+        try
         {
-            if (_previewResolved)
+            if (Item.ImageBytes is { Length: > 0 } bytes)
             {
-                return _preview;
+                return PreviewFromBytes(bytes);
             }
 
-            _previewResolved = true;
-
-            try
-            {
-                if (Item.ImageBytes is { Length: > 0 } bytes)
-                {
-                    _preview = PreviewFromBytes(bytes);
-                    return _preview;
-                }
-
-                var path = ResolveThumbnailPath(Item);
-                _preview = path is null ? null : PreviewFromFile(path);
-            }
-            catch (Exception ex)
-            {
-                // A broken or locked file must not take the panel down; the tip simply never opens.
-                Log.Warn($"Preview could not be decoded: {ex.Message}");
-                _preview = null;
-            }
-
-            return _preview;
+            var path = ResolveThumbnailPath(Item);
+            return path is null ? null : PreviewFromFile(path);
+        }
+        catch (Exception ex)
+        {
+            // A broken or locked file must not take the panel down; the tip simply never opens.
+            Log.Warn($"Preview could not be decoded: {ex.Message}");
+            return null;
         }
     }
 
@@ -141,6 +141,9 @@ public sealed class ItemRow
         var bitmap = new BitmapImage();
         bitmap.BeginInit();
         bitmap.CacheOption = BitmapCacheOption.OnDemand;
+        // WPF keeps its own cache keyed by URI; without this a dropped row would leave its pixels
+        // behind and clearing the list would not actually free anything.
+        bitmap.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
         bitmap.DecodePixelWidth = 112;
         bitmap.UriSource = new Uri(path);
         bitmap.EndInit();
@@ -174,6 +177,7 @@ public sealed class ItemRow
         bitmap.BeginInit();
         bitmap.CacheOption = BitmapCacheOption.OnLoad;
         ApplyLongSide(bitmap, width, height);
+        bitmap.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
         bitmap.UriSource = new Uri(path);
         bitmap.EndInit();
         bitmap.Freeze();

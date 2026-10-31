@@ -236,6 +236,11 @@ public partial class MainWindow : Window
         _pendingAnchor = null;
         var released = _rows.Count;
         _rows.Clear();
+
+        // The tip holds the last decoded preview, and the preview cache holds a handful more;
+        // both would survive the cleared rows.
+        TipImage.Source = null;
+        ItemRow.ClearPreviewCache();
         Log.Info($"Panel hidden, released {released} rows");
 
         // The panel may stay closed for hours, so ask for the memory now rather than leaving it

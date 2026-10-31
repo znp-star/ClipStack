@@ -386,6 +386,14 @@ UI 与 Win32 交互不铺自动化测试。
 - `ClipStack.App.csproj` 里 `System.GC.ConserveMemory = 5`：大对象堆释放后尽快把页面还给系统，否则 .NET 会把峰值一直驻留着。代价是回收更勤，CPU 略增。
 - 本机实测（Debug 构建，专用工作集）：空历史空闲 30–33MB；连续复制 50 段 500KB 文本后，旧行为峰值 180MB 且关闭面板也不回落，加上上面两项后关闭面板回落到 52MB 左右；30 条小文本的场景打开/关闭只差 4MB，这点抖动 .NET 不归还属正常，不必再用 `EmptyWorkingSet` 去硬压。
 
+### 内存：悬停大图 LRU
+
+- 悬停 tip 要的是 800px 解码图，一张约 2MB。原先缓存在 `ItemRow` 实例上，而行的寿命等于整个列表的寿命：开一次面板把 200 行从头划到尾，最多能留下几百 MB，且和「隐藏即释放」互相抵消（行清掉了，解码图跟着活到下次清空）。
+- 改为 `PreviewCache`（`src/ClipStack.App/PreviewCache.cs`）：静态 LRU，容量 8，键是 `ContentHash`（没哈希的敏感项退化为 `#id`），命中时把节点移到队首，超出容量从队尾淘汰。同一张图被多行引用（重复复制过）只解码一次。解码失败也缓存 null，坏文件不会每次悬停都重开一次。
+- `BitmapImage.CreateOptions = IgnoreImageCache` 必须加：WPF 自己按 `UriSource` 缓存解码结果，绕开它的话 `Clear()` 等于白做。
+- 面板隐藏时除了清 `_rows`，还要清 `TipImage.Source` 和整个缓存——tip 控件会持有最后一张大图，仅清列表不够。
+- 语义验证在临时工程里跑过（去重、容量、LRU 淘汰顺序、`Clear`、失败缓存，10 项全 PASS）；界面上确认键盘选中时 tip 仍能正常弹出大图。
+
 ---
 
 ## 13. 已知风险
