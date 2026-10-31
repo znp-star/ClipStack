@@ -22,6 +22,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Large pastes (logs, JSON, base64) land on the large object heap; without this the
+         process keeps that memory resident long after the panel is closed. 5 asks the GC to
+         decommit freed regions sooner, trading a little CPU for a smaller idle footprint. -->
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Velopack" Version="1.2.161" />
   </ItemGroup>
 

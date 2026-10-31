@@ -379,6 +379,13 @@ UI 与 Win32 交互不铺自动化测试。
 - 产物未签名，首次运行会触发 SmartScreen 警告；将来补证书时在 `vpk pack` 上加 `--signParams`。
 - CI 是 `.github/workflows/release.yml`：推 `v*` 标签或手动触发，跑测试 → 打包 → `vpk upload github`。标签名必须与包版本一致，否则客户端看不到更新。
 
+### 内存：隐藏即释放
+
+- 面板关闭是常驻态，而 `_rows` 里每一行都引用完整的 `ClipItem`（`text` / `html` / `rtf` 原文，图片行还有解码后的缩略图与悬停大图）。剪一段日志或 base64，一行就是几百 KB 到 1MB，200 行足以在关闭面板后继续占着几十 MB。`MainWindow.OnIsVisibleChanged` 在窗口变为不可见时清空 `_rows`、停掉预览延迟并丢弃待显示的 tip，下次打开由 `RefreshItems` 从数据库重建（几十毫秒）。隐藏前已经取到 `row` 的粘贴路径不受影响。
+- 清空之后立刻发一次 `GC.Collect(MaxGeneration, Forced, blocking: false)`：必须是 `Forced`，`Optimized` 允许 GC 自己判断「不值得收集」而直接跳过；必须非阻塞，否则粘贴前的隐藏会多等一次完整回收。
+- `ClipStack.App.csproj` 里 `System.GC.ConserveMemory = 5`：大对象堆释放后尽快把页面还给系统，否则 .NET 会把峰值一直驻留着。代价是回收更勤，CPU 略增。
+- 本机实测（Debug 构建，专用工作集）：空历史空闲 30–33MB；连续复制 50 段 500KB 文本后，旧行为峰值 180MB 且关闭面板也不回落，加上上面两项后关闭面板回落到 52MB 左右；30 条小文本的场景打开/关闭只差 4MB，这点抖动 .NET 不归还属正常，不必再用 `EmptyWorkingSet` 去硬压。
+
 ---
 
 ## 13. 已知风险

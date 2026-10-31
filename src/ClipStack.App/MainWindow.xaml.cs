@@ -64,6 +64,7 @@ public partial class MainWindow : Window
         PreviewKeyDown += OnPreviewKeyDown;
         Deactivated += OnDeactivated;
         SourceInitialized += OnSourceInitialized;
+        IsVisibleChanged += OnIsVisibleChanged;
         _tipDelay.Tick += OnTipDelayElapsed;
 
         _ready = true;
@@ -214,6 +215,33 @@ public partial class MainWindow : Window
         {
             _targetFocus?.Restore(_target);
         }
+    }
+
+    /// <summary>
+    /// Hidden is the normal state of a tray app, and the rows are a preview nobody is looking at:
+    /// each one keeps its entry's full text plus HTML/RTF renditions, an optional decoded
+    /// thumbnail and, if it was hovered, an 800px preview. Dropping them on hide returns that
+    /// memory; opening again rebuilds from the store, which costs a few milliseconds.
+    /// </summary>
+    private void OnIsVisibleChanged(object? sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (IsVisible)
+        {
+            return;
+        }
+
+        _tipDelay.Stop();
+        HideRowTip();
+        _pendingRow = null;
+        _pendingAnchor = null;
+        var released = _rows.Count;
+        _rows.Clear();
+        Log.Info($"Panel hidden, released {released} rows");
+
+        // The panel may stay closed for hours, so ask for the memory now rather than leaving it
+        // to whenever the next natural collection happens. Forced, because Optimized is free to
+        // decide a collection is not worth it; non-blocking, because hiding must stay instant.
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: false);
     }
 
     public void SetStatus(string message)
