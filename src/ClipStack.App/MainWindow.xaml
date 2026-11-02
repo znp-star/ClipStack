@@ -12,8 +12,8 @@
         ShowInTaskbar="False"
         Topmost="True"
         WindowStartupLocation="CenterScreen"
-        FontFamily="Microsoft YaHei UI, Segoe UI"
-        FontSize="13"
+        FontFamily="Segoe UI Variable Text, Microsoft YaHei UI, Segoe UI"
+        FontSize="14"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True">
 
@@ -189,12 +189,12 @@
                                              selected row never paints over the rule. -->
                                         <StackPanel>
                                             <Border x:Name="RowBorder"
-                                                    MinHeight="52"
+                                                    MinHeight="62"
                                                     Background="Transparent"
                                                     BorderBrush="Transparent"
                                                     BorderThickness="1"
                                                     CornerRadius="6"
-                                                    Padding="12,7,10,7">
+                                                    Padding="12,10,10,10">
                                                 <Grid>
                                                     <!-- Shape, not only colour: the row that Enter will
                                                          paste carries a stripe. -->
@@ -283,9 +283,9 @@
                                            Foreground="{DynamicResource TextPrimaryBrush}"
                                            TextWrapping="Wrap"
                                            TextTrimming="CharacterEllipsis"
-                                           LineHeight="18"
+                                           LineHeight="21"
                                            LineStackingStrategy="BlockLineHeight"
-                                           MaxHeight="36" />
+                                           MaxHeight="42" />
 
                                 <!-- Trailing chips: the "未保存" badge marks in-memory rows, the pin
                                      control toggles pinning. Clicking either never pastes. -->
@@ -464,8 +464,8 @@
                         <TextBlock x:Name="TipText"
                                    MaxWidth="520"
                                    MaxHeight="440"
-                                   FontSize="12.5"
-                                   LineHeight="19"
+                                   FontSize="14"
+                                   LineHeight="21"
                                    LineStackingStrategy="BlockLineHeight"
                                    TextWrapping="Wrap"
                                    TextTrimming="CharacterEllipsis"

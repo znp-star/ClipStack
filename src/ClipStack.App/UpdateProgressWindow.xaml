@@ -9,7 +9,7 @@
         WindowStyle="ToolWindow"
         Background="{DynamicResource SurfaceBrush}"
         Foreground="{DynamicResource TextPrimaryBrush}"
-        FontFamily="Microsoft YaHei UI, Segoe UI"
+        FontFamily="Segoe UI Variable Text, Microsoft YaHei UI, Segoe UI"
         FontSize="13"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
