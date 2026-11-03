@@ -294,7 +294,7 @@ UI 与 Win32 交互不铺自动化测试。
 
 - 面板改用 `WindowChrome`（`CaptionHeight=0`、`ResizeBorderThickness=6`、`GlassFrameThickness=-1`）：四边可拖拽缩放，且客户区交给 DWM 绘制 Mica。
 - Mica 用 `DWMWA_SYSTEMBACKDROP_TYPE = 2`（需 22621+）；不可用时回退为不透明 `SurfaceBrush`，日志记 `Panel backdrop`。
-- 选中色取自 DWM 系统强调色（`DwmGetColorizationColor`），透明度分层区分 hover / selected。
+- 选中色取自 DWM 系统强调色（`DwmGetColorizationColor`）。整张列表只有一个高亮态：鼠标悬停直接改变选中行，不再另画 hover 底色。
 - 位置尺寸按显示器设备名记忆，存**物理像素 + 该显示器 DPI**，恢复时按当前 DPI 换算，避免跨屏漂移；上限为工作区 70%。
 - 图片捕获：优先读 `PNG` 格式（原生保留 alpha），否则读 `CF_DIBV5`/`CF_DIB` 并自行转 PNG（`DibImage`，支持 24/32 位、BI_RGB/BI_BITFIELDS、上下行序），不引入 `System.Drawing`。
 - 图片按内容哈希落盘为 `images\<hash>.png`，同图只存一份；DB 仅存路径。
@@ -308,12 +308,14 @@ UI 与 Win32 交互不铺自动化测试。
 
 - 过滤条做 全部 / 文本 / 链接 / 图片 / 文件；「敏感」要等 M4 的 `SensitivityFilter` 落地后再加，避免出现永远为空的分类（已于 M4 补齐）。`Ctrl+Tab` / `Ctrl+Shift+Tab` 循环切换，每次唤出面板都重置为「全部」。
 - 链接不是第四种 `ClipType`：库里仍是 `text`，另加 `is_link` 列（`LinkText.Is`：整条内容匹配 `^(https?://|www\.)\S+$`，夹在正文里的网址不算），这样过滤、排序、分页都走 SQL，回贴行为不变。`is_link` 属于 schema v2，旧库在打开时 `ALTER TABLE` 补列并用 C# 回填分类，`user_version` 从 1 升到 2。
-- 置顶排序沿用 `Query` 里的 `pinned DESC, pinned_at DESC`。行与行之间统一画浅灰细线（`DividerBrush`，左右各内缩 12px）：线是 `ListBoxItem` 模板里行背景的兄弟节点，选中高亮盖不到它；置顶块与时间流的边界因此不再需要单独的分隔线（`DividerVisibility` 已删）。置顶用行尾的裸图钉图标（Segoe Fluent Icons `E718`，无底色）：置顶行常显、强调色，未置顶行悬停才出现、灰色，点击即切换（`PinButton_Click`，点按钮不触发条目粘贴），Ctrl+P 仍作用于选中行。置顶行整体带一层极淡的强调色底（`PinnedRowBrush`）。
+- 置顶排序沿用 `Query` 里的 `pinned DESC, pinned_at DESC`。行与行之间统一画浅灰细线（`DividerBrush`，左右各内缩 12px）：线是 `ListBoxItem` 模板里行背景的兄弟节点，选中高亮盖不到它；置顶块与时间流的边界因此不再需要单独的分隔线（`DividerVisibility` 已删）。置顶用行尾的裸图钉图标（Segoe Fluent Icons `E718`，无底色）：置顶行常显、强调色，未置顶行悬停才出现、灰色，点击即切换（`PinButton_Click`，点按钮不触发条目粘贴），Ctrl+P 仍作用于选中行。置顶行不再带底色：`PinnedRowBrush` 现在只用于过滤条上的置顶计数徽标，行本身靠行尾常显的强调色图钉和它所在的区块位置来识别。
 - 行首放缩略图（56×38，垂直居中，圆角 4、1px `EdgeBrush` 描边）。缩略图用 `ImageBrush` 当 `Border` 背景而不是 `Image` 子元素：`ClipToBounds` 只按矩形裁剪，圆角只能靠背景绘制才生效。有缩略图的行不再显示类型角标，图片条目也不显示「图片」这条预览文本。
+- 悬停即选中（`SelectRowUnderPointer`）：鼠标和键盘共用同一个高亮，Enter 永远贴当前高亮那一条，不会再出现「鼠标指着 A、回车贴的却是 B」。面板本就弹在光标下方，所以指针要先离开唤出时的落点 4 DIP，才允许它接管选中（`_pointerArmed` / `_showPointer`），否则唤出瞬间光标下那一行会把「记住的落点」（置顶第一条或时间流最新）顶掉。悬停只改选中、不 `ScrollIntoView`，避免列表跟着指针自己滚。
 - 行的垂直节奏：`Padding="12,7,10,7"` + 1px 分隔线，上下对称各 7px；不再给 `ListBoxItem` 加外边距，否则分隔线会贴下一行更近，看起来是「1 行 + 大空隙」。
 - 选中态除了底色与 1px 描边，还在行的左内侧加一根 3px 强调色竖条（`ActiveStripe`）：面板是键盘驱动的，颜色之外还要有一个形状信号说明「Enter 会粘贴这一行」。
 - 右侧滚动条换成细滚动条：`App.xaml` 里的隐式 `ScrollBar` 样式去掉上下箭头按钮与轨道底色，只留 6px 圆角滑块（10px 命中宽度），hover / 拖动两档加深；轨道空白处仍可点击翻页。样式是应用级的，编辑窗口的文本框滚动条一并跟上。
 - 取消置顶（`Ctrl+P`）后，该条会落到下方时间流里，选中若跟着它走会把面板甩到很远的位置。因此取消置顶后默认回到置顶区的第一条；置顶区清空时就是列表第一条（`SelectPinnedOrFirst`）。置顶操作本身仍然跟着那条走。
+- 置顶区可以整块收起：过滤条右端的「置顶 N ⌄」按钮切换展开 / 收起，默认展开。收起时置顶行不进列表，面板从时间流最新一条开始；展开时唤出面板默认选中置顶第一条（`DefaultSelectionIndex`，两部落点其实都是 0，扫一遍是为了过滤把置顶全挡住时不选错）。状态存 `AppSettings.PinnedExpanded`，点一下即写盘，所以下次唤出乃至关机重启后都还是上次的样子。收起状态下按 `Ctrl+P` 或点行尾图钉置顶会自动展开置顶区，否则那一条会在眼前消失；收起且过滤后只剩置顶条目时，空态提示换成「置顶条目已收起」。
 - 编辑只对文本条目开放（`F2`），图片与文件给出「只有文本条目可以编辑」的提示。保存时重算内容哈希、清掉 `html` / `rtf`，否则回贴会把旧富文本粘出去；新文本与另一条重复时拒绝保存并提示。
 - 编辑窗口是独立 `ToolWindow`，以面板为 Owner。打开前打上 `_suppressDeactivate`，否则面板会被自己的失焦逻辑藏起来；关闭后强制把焦点还给搜索框。
 - 删除（`Delete`）走 `ItemStore.Delete`，顺带删掉图片文件；搜索框有内容时 `Delete` 仍留给文本框编辑，空搜索框才删条目。

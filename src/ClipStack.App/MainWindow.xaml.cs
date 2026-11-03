@@ -47,11 +47,34 @@ public partial class MainWindow : Window
     private bool _ready;
     private bool _previewTip = true;
 
+    // Whether the pinned block is open. Mirrors AppSettings.PinnedExpanded, which is written on
+    // every toggle: the panel is meant to come back the way it was left, even after a reboot.
+    private bool _pinnedExpanded = true;
+
+    // Pinned rows the current filter and search would show, so a folded block can say how much it
+    // is holding back.
+    private int _pinnedCount;
+
     // The row the tip is anchored to, and the one it is about to be. Keeping both lets a pointer
     // move cancel a pending tip and close a visible one on the row it was opened for.
     private FrameworkElement? _tipAnchor;
     private ItemRow? _pendingRow;
     private FrameworkElement? _pendingAnchor;
+
+    // Where the pointer sat when the panel appeared, and whether it has moved since. The panel
+    // opens under the cursor, so the row that happens to be there must not steal the remembered
+    // landing row until the hand actually moves.
+    private Point _showPointer;
+    private bool _pointerArmed;
+
+    /// <summary>How far the pointer has to travel before it may take the selection over, in DIP.</summary>
+    private const double PointerArmDistance = 4;
+
+    /// <summary>How long a wheel gesture keeps the pointer from stealing the selection, in ms.</summary>
+    private const long ScrollSettleMs = 150;
+
+    /// <summary>Timestamp of the last scroll tick, so a wheel gesture is not read as a pointer move.</summary>
+    private long _lastScrollTicks;
 
     public MainWindow(ItemStore store, SettingsStore settings, SensitiveQueue queue)
     {
@@ -59,6 +82,10 @@ public partial class MainWindow : Window
         _settings = settings;
         _queue = queue;
         InitializeComponent();
+
+        // The panel's first paint has to match the remembered shape, before any rows exist.
+        _pinnedExpanded = _settings.Current.PinnedExpanded;
+        UpdatePinnedToggle();
 
         ItemList.ItemsSource = _rows;
         PreviewKeyDown += OnPreviewKeyDown;
@@ -187,16 +214,21 @@ public partial class MainWindow : Window
         SearchBox.Focus();
         Keyboard.Focus(SearchBox);
 
-        // Every invocation starts at the newest entry, not whatever was selected last time.
+        // Every invocation starts at the top of what is visible: the first pinned entry while the
+        // block is open, the newest unpinned one while it is folded.
         if (_rows.Count > 0)
         {
-            ItemList.SelectedIndex = 0;
+            ItemList.SelectedIndex = DefaultSelectionIndex();
             ItemList.ScrollIntoView(ItemList.SelectedItem);
         }
         else
         {
             ItemList.SelectedIndex = -1;
         }
+
+        // The pointer starts unarmed: whichever row the cursor landed on only takes over once it moves.
+        _showPointer = Mouse.GetPosition(this);
+        _pointerArmed = false;
 
         AnimateIn();
     }
@@ -269,14 +301,21 @@ public partial class MainWindow : Window
         var stored = _store.Query(SearchBox.Text, _filter, MaxRows, _linksOnly);
         var sensitive = _queue.Query(SearchBox.Text, _filter, _linksOnly, now);
 
-        // Pinned entries stay on top; everything else, sensitive or not, is one time flow.
+        // Pinned entries stay on top; everything else, sensitive or not, is one time flow. Folded,
+        // the pinned block is simply not part of the list, so the flow starts at the top instead.
+        var pinned = stored.Where(item => item.Pinned).ToList();
+        var flow = stored.Where(item => !item.Pinned)
+            .Concat(sensitive)
+            .OrderByDescending(item => item.LastUsedAtMs);
+
         IEnumerable<ClipItem> visible = _sensitiveOnly
             ? sensitive
-            : stored.Where(item => item.Pinned)
-                .Concat(stored.Where(item => !item.Pinned)
-                    .Concat(sensitive)
-                    .OrderByDescending(item => item.LastUsedAtMs))
+            : (_pinnedExpanded ? pinned.AsEnumerable() : Enumerable.Empty<ClipItem>())
+                .Concat(flow)
                 .Take(MaxRows);
+
+        _pinnedCount = _sensitiveOnly ? 0 : pinned.Count;
+        UpdatePinnedToggle();
 
         // Rebuilding the rows invalidates the container the tip is anchored to.
         HideRowTip();
@@ -287,13 +326,15 @@ public partial class MainWindow : Window
             _rows.Add(new ItemRow(item));
         }
 
-        EmptyHint.Text = !string.IsNullOrWhiteSpace(SearchBox.Text)
-            ? "没有匹配的记录"
-            : _sensitiveOnly
-                ? "暂时没有敏感内容"
-                : _filter is not null
-                    ? "这个分类还没有记录"
-                    : "还没有记录，复制点什么试试";
+        EmptyHint.Text = _rows.Count == 0 && !_pinnedExpanded && _pinnedCount > 0
+            ? "置顶条目已收起，没有其他记录"
+            : !string.IsNullOrWhiteSpace(SearchBox.Text)
+                ? "没有匹配的记录"
+                : _sensitiveOnly
+                    ? "暂时没有敏感内容"
+                    : _filter is not null
+                        ? "这个分类还没有记录"
+                        : "还没有记录，复制点什么试试";
         EmptyHint.Visibility = _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
         if (_rows.Count == 0)
@@ -316,6 +357,27 @@ public partial class MainWindow : Window
 
         ItemList.SelectedIndex = restoredIndex;
         ItemList.ScrollIntoView(ItemList.SelectedItem);
+    }
+
+    /// <summary>
+    /// Where the panel starts: the first pinned entry while the block is open, otherwise the top of
+    /// the flow. Pinned rows sort ahead of everything, so an open block normally answers 0 — the
+    /// scan is there so a filter or search that hides all of them still lands on a real row.
+    /// </summary>
+    private int DefaultSelectionIndex()
+    {
+        if (_pinnedExpanded)
+        {
+            for (var i = 0; i < _rows.Count; i++)
+            {
+                if (_rows[i].IsPinned)
+                {
+                    return i;
+                }
+            }
+        }
+
+        return 0;
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -486,15 +548,94 @@ public partial class MainWindow : Window
             return;
         }
 
-        var unpinning = row.Item.Pinned;
+        var pinning = !row.Item.Pinned;
 
-        _store.SetPinned(row.Item.Id, !row.Item.Pinned, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        _store.SetPinned(row.Item.Id, pinning, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+
+        // Pinning into a folded block would make the row disappear under the cursor; open the block
+        // so the result is visible, which also re-selects the row where it now sits, on top.
+        if (pinning && !_pinnedExpanded)
+        {
+            SetPinnedExpanded(true);
+            return;
+        }
+
         RefreshItems();
 
-        if (unpinning)
+        if (!pinning)
         {
             SelectPinnedOrFirst();
         }
+    }
+
+    private void PinnedToggle_Click(object sender, RoutedEventArgs e)
+    {
+        // The click must not fall through to the window's drag handling.
+        e.Handled = true;
+        SetPinnedExpanded(!_pinnedExpanded);
+    }
+
+    /// <summary>
+    /// Opens or folds the pinned block and remembers the choice in settings, so the next panel —
+    /// this session, or after a reboot — comes back in the same shape.
+    /// </summary>
+    private void SetPinnedExpanded(bool expanded)
+    {
+        _pinnedExpanded = expanded;
+
+        if (_settings.Current.PinnedExpanded != expanded)
+        {
+            _settings.Current.PinnedExpanded = expanded;
+            _settings.Save();
+        }
+
+        RefreshItems();
+
+        // The block just appeared or vanished, so the remembered row means little now: start from
+        // the top of whatever is visible.
+        if (_rows.Count > 0)
+        {
+            ItemList.SelectedIndex = DefaultSelectionIndex();
+            ItemList.ScrollIntoView(ItemList.SelectedItem);
+        }
+
+        Log.Info(expanded ? "Pinned block expanded" : "Pinned block collapsed");
+    }
+
+    /// <summary>
+    /// Keeps the toggle in step with the block it controls: the chevron points down while open and
+    /// right while folded, and the count says how many pinned rows are on offer or held back.
+    /// </summary>
+    private void UpdatePinnedToggle()
+    {
+        // Folded with something inside is the one state worth pointing at.
+        var holdingBack = !_pinnedExpanded && _pinnedCount > 0;
+
+        PinnedCountText.Text = _pinnedCount.ToString(CultureInfo.CurrentCulture);
+        PinnedCountBadge.Visibility = _pinnedCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        // Both states share the same tinted capsule and accent digit; only the outline changes, so
+        // the badge never shifts size or weight. While the rows are on screen it is flat; once they
+        // are stowed away the accent ring says "there is something folded in here". The border is
+        // always 1px thick (transparent when flat) to keep the box from growing by two pixels.
+        PinnedCountBadge.SetResourceReference(Border.BackgroundProperty, "PinnedRowBrush");
+        if (holdingBack)
+        {
+            PinnedCountBadge.SetResourceReference(Border.BorderBrushProperty, "AccentBrush");
+        }
+        else
+        {
+            PinnedCountBadge.ClearValue(Border.BorderBrushProperty);
+        }
+
+        PinnedCountText.SetResourceReference(TextBlock.ForegroundProperty, "AccentBrush");
+
+        PinnedChevron.Text = _pinnedExpanded ? "\uE70D" : "\uE76C";
+        PinnedToggle.ToolTip = _pinnedExpanded ? "收起置顶条目" : "展开置顶条目";
+
+        // Same cue for the label: it steps up to primary text while it is holding rows back.
+        PinnedLabel.SetResourceReference(
+            TextBlock.ForegroundProperty, holdingBack ? "TextPrimaryBrush" : "TextSecondaryBrush");
     }
 
     /// <summary>
@@ -792,6 +933,8 @@ public partial class MainWindow : Window
     /// </summary>
     private void ItemList_MouseMove(object sender, MouseEventArgs e)
     {
+        SelectRowUnderPointer(e);
+
         if (ItemsControl.ContainerFromElement(ItemList, e.OriginalSource as DependencyObject) is FrameworkElement container &&
             container.DataContext is ItemRow row)
         {
@@ -820,8 +963,48 @@ public partial class MainWindow : Window
 
     private void ItemList_MouseLeave(object sender, MouseEventArgs e) => HideRowTip();
 
+    /// <summary>
+    /// The pointer drives the selection, so both hands light up a row the same way and Enter always
+    /// pastes the row that is highlighted. Ignored until the pointer has moved away from where the
+    /// panel appeared, otherwise a panel popping open under the cursor would silently override the
+    /// remembered landing row before the user has done anything.
+    /// </summary>
+    private void SelectRowUnderPointer(MouseEventArgs e)
+    {
+        var position = e.GetPosition(this);
+
+        if (!_pointerArmed)
+        {
+            if (Math.Abs(position.X - _showPointer.X) < PointerArmDistance &&
+                Math.Abs(position.Y - _showPointer.Y) < PointerArmDistance)
+            {
+                return;
+            }
+
+            _pointerArmed = true;
+        }
+
+        if (Environment.TickCount64 - _lastScrollTicks < ScrollSettleMs)
+        {
+            return;
+        }
+
+        if (ItemsControl.ContainerFromElement(ItemList, e.OriginalSource as DependencyObject) is ListBoxItem container &&
+            !container.IsSelected)
+        {
+            container.IsSelected = true;
+        }
+    }
+
     /// <summary>Row containers move under the tip while scrolling, so the tip would drift: drop it.</summary>
-    private void ItemList_ScrollChanged(object sender, ScrollChangedEventArgs e) => HideRowTip();
+    private void ItemList_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        HideRowTip();
+
+        // Scrolling drags rows underneath a stationary pointer, which the hit test reports as a
+        // pointer move. Selection must not chase the wheel, so it sits out the rest of the gesture.
+        _lastScrollTicks = Environment.TickCount64;
+    }
 
     private void OnTipDelayElapsed(object? sender, EventArgs e)
     {
@@ -1038,8 +1221,19 @@ public partial class MainWindow : Window
             }
             else
             {
-                _store.SetPinned(row.Item.Id, !row.Item.Pinned, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-                RefreshItems();
+                var pinning = !row.Item.Pinned;
+                _store.SetPinned(row.Item.Id, pinning, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+
+                // Same rule as the keyboard path: a row pinned while the block is folded would
+                // vanish, so the block opens and the refresh selects its new place on top.
+                if (pinning && !_pinnedExpanded)
+                {
+                    SetPinnedExpanded(true);
+                }
+                else
+                {
+                    RefreshItems();
+                }
             }
         }
 

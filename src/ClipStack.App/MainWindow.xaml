@@ -21,7 +21,7 @@
         <!-- Filter bar chip: a radio button rendered as a pill so the whole bar reads as one control. -->
         <Style x:Key="FilterChip" TargetType="RadioButton">
             <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontSize" Value="12.5" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Margin" Value="0,0,6,0" />
             <Setter Property="Template">
@@ -119,48 +119,120 @@
                 </Grid>
             </Border>
 
-            <!-- Filter bar -->
-            <StackPanel Grid.Row="1"
-                        Orientation="Horizontal"
-                        Margin="2,0,0,8">
-                <RadioButton x:Name="FilterAll"
-                             Style="{StaticResource FilterChip}"
-                             GroupName="Filter"
-                             Tag="all"
-                             Content="全部"
-                             IsChecked="True"
-                             Checked="FilterChip_Checked" />
-                <RadioButton x:Name="FilterText"
-                             Style="{StaticResource FilterChip}"
-                             GroupName="Filter"
-                             Tag="text"
-                             Content="文本"
-                             Checked="FilterChip_Checked" />
-                <RadioButton x:Name="FilterLink"
-                             Style="{StaticResource FilterChip}"
-                             GroupName="Filter"
-                             Tag="link"
-                             Content="链接"
-                             Checked="FilterChip_Checked" />
-                <RadioButton x:Name="FilterImage"
-                             Style="{StaticResource FilterChip}"
-                             GroupName="Filter"
-                             Tag="image"
-                             Content="图片"
-                             Checked="FilterChip_Checked" />
-                <RadioButton x:Name="FilterFile"
-                             Style="{StaticResource FilterChip}"
-                             GroupName="Filter"
-                             Tag="file"
-                             Content="文件"
-                             Checked="FilterChip_Checked" />
-                <RadioButton x:Name="FilterSensitive"
-                             Style="{StaticResource FilterChip}"
-                             GroupName="Filter"
-                             Tag="sensitive"
-                             Content="敏感"
-                             Checked="FilterChip_Checked" />
-            </StackPanel>
+            <!-- Filter bar, with the pinned-block toggle parked on its right edge. The chips wrap
+                 instead of clipping, because the toggle takes width away from a narrow panel. -->
+            <Grid Grid.Row="1" Margin="2,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <WrapPanel Grid.Column="0" Orientation="Horizontal">
+                    <RadioButton x:Name="FilterAll"
+                                 Style="{StaticResource FilterChip}"
+                                 GroupName="Filter"
+                                 Tag="all"
+                                 Content="全部"
+                                 IsChecked="True"
+                                 Checked="FilterChip_Checked" />
+                    <RadioButton x:Name="FilterText"
+                                 Style="{StaticResource FilterChip}"
+                                 GroupName="Filter"
+                                 Tag="text"
+                                 Content="文本"
+                                 Checked="FilterChip_Checked" />
+                    <RadioButton x:Name="FilterLink"
+                                 Style="{StaticResource FilterChip}"
+                                 GroupName="Filter"
+                                 Tag="link"
+                                 Content="链接"
+                                 Checked="FilterChip_Checked" />
+                    <RadioButton x:Name="FilterImage"
+                                 Style="{StaticResource FilterChip}"
+                                 GroupName="Filter"
+                                 Tag="image"
+                                 Content="图片"
+                                 Checked="FilterChip_Checked" />
+                    <RadioButton x:Name="FilterFile"
+                                 Style="{StaticResource FilterChip}"
+                                 GroupName="Filter"
+                                 Tag="file"
+                                 Content="文件"
+                                 Checked="FilterChip_Checked" />
+                    <RadioButton x:Name="FilterSensitive"
+                                 Style="{StaticResource FilterChip}"
+                                 GroupName="Filter"
+                                 Tag="sensitive"
+                                 Content="敏感"
+                                 Checked="FilterChip_Checked" />
+                </WrapPanel>
+
+                <!-- Pinned-block toggle. Reads as a section header: name, how many rows it holds,
+                     and a chevron that points down while open and right while folded. The choice is
+                     written to settings the moment it changes, so it outlives the process. -->
+                <Button x:Name="PinnedToggle"
+                        Grid.Column="1"
+                        Margin="4,0,0,0"
+                        VerticalAlignment="Top"
+                        Focusable="False"
+                        Cursor="Hand"
+                        Click="PinnedToggle_Click"
+                        ToolTip="收起置顶条目"
+                        AutomationProperties.Name="展开或收起置顶条目">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="ToggleBorder"
+                                    Background="Transparent"
+                                    BorderBrush="Transparent"
+                                    BorderThickness="1"
+                                    CornerRadius="10"
+                                    Padding="7,2">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="ToggleBorder" Property="Background"
+                                            Value="{DynamicResource HoverBrush}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock x:Name="PinnedLabel"
+                                   Text="置顶"
+                                   FontSize="12.5"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                        <!-- Count of the pinned rows the current filter and search would show, as a
+                             capsule rather than a bare digit so it reads as a quantity at a glance.
+                             Hidden at zero so an empty block does not advertise itself. -->
+                        <Border x:Name="PinnedCountBadge"
+                                MinHeight="16"
+                                Margin="5,0,0,0"
+                                Padding="5,0"
+                                VerticalAlignment="Center"
+                                CornerRadius="8"
+                                BorderThickness="1"
+                                BorderBrush="Transparent"
+                                Background="{DynamicResource PinnedRowBrush}"
+                                Visibility="Collapsed">
+                            <TextBlock x:Name="PinnedCountText"
+                                       FontSize="10.5"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center"
+                                       TextAlignment="Center"
+                                       Foreground="{DynamicResource AccentBrush}" />
+                        </Border>
+                        <TextBlock x:Name="PinnedChevron"
+                                   Text="&#xE70D;"
+                                   FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                   FontSize="10.5"
+                                   Margin="5,0,0,0"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                    </StackPanel>
+                </Button>
+            </Grid>
 
             <!-- Items -->
             <Grid Grid.Row="2">
@@ -214,16 +286,9 @@
                                                     Background="{DynamicResource DividerBrush}" />
                                         </StackPanel>
                                         <ControlTemplate.Triggers>
-                                            <!-- The pinned block sits on top; a faint tint keeps its
-                                                 edge readable without a second divider. -->
-                                            <DataTrigger Binding="{Binding IsPinned}" Value="True">
-                                                <Setter TargetName="RowBorder" Property="Background"
-                                                        Value="{DynamicResource PinnedRowBrush}" />
-                                            </DataTrigger>
-                                            <Trigger Property="IsMouseOver" Value="True">
-                                                <Setter TargetName="RowBorder" Property="Background"
-                                                        Value="{DynamicResource HoverBrush}" />
-                                            </Trigger>
+                                            <!-- One highlight only: the pointer moves the selection rather
+                                                 than painting a second, differently shaped state beside it.
+                                                 Pinned rows carry a filled pin glyph instead of a tint. -->
                                             <Trigger Property="IsSelected" Value="True">
                                                 <Setter TargetName="RowBorder" Property="Background"
                                                         Value="{DynamicResource SelectionBrush}" />

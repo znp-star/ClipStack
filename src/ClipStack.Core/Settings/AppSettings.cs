@@ -28,6 +28,13 @@ public sealed class AppSettings
     /// </summary>
     public bool ShowPreviewTip { get; set; } = true;
 
+    /// <summary>
+    /// Whether the pinned block is open at the top of the panel. True by default; the toggle in the
+    /// panel writes the choice here so the next invocation — including one after a reboot — opens
+    /// in the same shape.
+    /// </summary>
+    public bool PinnedExpanded { get; set; } = true;
+
     /// <summary>Keyed by monitor device name, e.g. <c>\\.\DISPLAY1</c>.</summary>
     public Dictionary<string, PanelGeometry> PanelGeometry { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
