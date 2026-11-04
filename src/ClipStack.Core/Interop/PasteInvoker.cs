@@ -105,46 +105,41 @@ public static class PasteInvoker
         return NativeMethods.GetForegroundWindow() == target;
     }
 
+    /// <summary>
+    /// The virtual keys of a paste gesture, in the order they must go down and up.
+    ///
+    /// A terminal pastes on <c>Shift+Insert</c> (Windows Terminal, conhost, WezTerm, Alacritty and
+    /// mintty all bind it) and binds no Ctrl variant, so Ctrl must stay out of this gesture: a
+    /// Ctrl+Shift+Insert would fall through the terminal to the program running in it, where it is
+    /// just an unrecognised key — nvim prints it as <c>&lt;C-S-Insert&gt;</c> into the buffer while
+    /// in insert mode, and drops it in normal mode.
+    /// </summary>
+    public static IReadOnlyList<(ushort VirtualKey, bool Up)> PasteKeystrokes(bool shiftInsert) =>
+        shiftInsert
+            ? [(VK_SHIFT, false), (VK_INSERT, false), (VK_INSERT, true), (VK_SHIFT, true)]
+            : [(VK_CONTROL, false), (VK_V, false), (VK_V, true), (VK_CONTROL, true)];
+
     private static void SendPasteKeystroke(bool shiftInsert)
     {
-        var inputs = new List<NativeMethods.INPUT>(5);
-
-        void Key(ushort virtualKey, bool up) => inputs.Add(new NativeMethods.INPUT
-        {
-            type = NativeMethods.INPUT_KEYBOARD,
-            u = new NativeMethods.INPUTUNION
+        var inputs = PasteKeystrokes(shiftInsert)
+            .Select(step => new NativeMethods.INPUT
             {
-                ki = new NativeMethods.KEYBDINPUT
+                type = NativeMethods.INPUT_KEYBOARD,
+                u = new NativeMethods.INPUTUNION
                 {
-                    wVk = virtualKey,
-                    dwFlags = up ? NativeMethods.KEYEVENTF_KEYUP : 0,
+                    ki = new NativeMethods.KEYBDINPUT
+                    {
+                        wVk = step.VirtualKey,
+                        dwFlags = step.Up ? NativeMethods.KEYEVENTF_KEYUP : 0,
+                    },
                 },
-            },
-        });
+            })
+            .ToArray();
 
-        var key = shiftInsert ? VK_INSERT : VK_V;
-
-        Key(VK_CONTROL, up: false);
-        if (shiftInsert)
+        var sent = NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<NativeMethods.INPUT>());
+        if (sent != inputs.Length)
         {
-            Key(VK_SHIFT, up: false);
-        }
-
-        Key(key, up: false);
-        Key(key, up: true);
-
-        if (shiftInsert)
-        {
-            Key(VK_SHIFT, up: true);
-        }
-
-        Key(VK_CONTROL, up: true);
-
-        var array = inputs.ToArray();
-        var sent = NativeMethods.SendInput((uint)array.Length, array, Marshal.SizeOf<NativeMethods.INPUT>());
-        if (sent != array.Length)
-        {
-            Log.Warn($"SendInput delivered {sent}/{array.Length} events");
+            Log.Warn($"SendInput delivered {sent}/{inputs.Length} events");
         }
     }
 }
